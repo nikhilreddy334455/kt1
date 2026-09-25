@@ -21,8 +21,35 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
 
-  // Check stored JWT session token on mount
+  // Check stored JWT session token or OAuth redirect token on mount
   useEffect(() => {
+    const hash = window.location.hash;
+    if (hash && hash.includes('access_token=')) {
+      const params = new URLSearchParams(hash.replace(/^#/, ''));
+      const accessToken = params.get('access_token');
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+
+      if (accessToken) {
+        fetch(apiUrl('/api/auth/google'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accessToken })
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.token && data.patient) {
+              localStorage.setItem('healthsync_token', data.token);
+              setCurrentUser(data.patient);
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            setIsCheckingSession(false);
+          });
+        return;
+      }
+    }
+
     const token = localStorage.getItem('healthsync_token');
     if (!token) {
       setIsCheckingSession(false);
