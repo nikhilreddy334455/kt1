@@ -1,18 +1,13 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 dotenv.config();
-
-const apiKey = process.env.GEMINI_API_KEY;
-let aiClient = null;
-
-if (apiKey && apiKey !== 'your_google_genai_api_key' && apiKey.trim() !== '') {
-  try {
-    aiClient = new GoogleGenAI({ apiKey });
-  } catch (err) {
-    console.warn('Failed to initialize GoogleGenAI client:', err.message);
-  }
-}
 
 const SYSTEM_PROMPT = `You are 'HealthSync', an empathetic, intelligent medical concierge assistant. 
 Your tone must be highly reassuring, professional, and human-like. 
@@ -48,7 +43,28 @@ const RESPONSE_SCHEMA = {
   required: ["replyText", "urgencyLevel", "needsHandoff", "clinicalSummary"]
 };
 
-// Heuristic fallback for zero-dependency / offline / missing-key resilience
+// Candidate Gemini models in order of speed and availability
+const CANDIDATE_MODELS = [
+  'gemini-flash-lite-latest',
+  'gemini-3.5-flash-lite',
+  'gemini-3.7-flash',
+  'gemini-flash-latest'
+];
+
+function getAiClient() {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || key === 'your_google_genai_api_key' || key.trim() === '') {
+    return null;
+  }
+  try {
+    return new GoogleGenAI({ apiKey: key });
+  } catch (err) {
+    console.warn('Failed to initialize GoogleGenAI client:', err.message);
+    return null;
+  }
+}
+
+// Dynamic clinical heuristics fallback if AI service is unavailable
 function analyzeWithHeuristics(message, history = [], patientInfo = {}) {
   const lowerMsg = message.toLowerCase();
   
@@ -65,11 +81,6 @@ function analyzeWithHeuristics(message, history = [], patientInfo = {}) {
     'high fever', 'persistent vomiting', 'broken bone', 'fracture', 'deep cut',
     'severe burn', 'dislocated', 'unbearable pain', 'intense pain', 'blood in urine', 'blood in stool'
   ];
-  
-  const mediumKeywords = [
-    'mild fever', 'cough', 'flu', 'sore throat', 'sprain', 'migraine', 'rash', 'earache',
-    'abdominal ache', 'stomach ache', 'vomiting', 'diarrhea', 'allergy'
-  ];
 
   const schedulingKeywords = [
     'appointment', 'schedule', 'book', 'reschedule', 'visit', 'doctor', 'consultation', 'slot', 'calendar'
@@ -79,22 +90,21 @@ function analyzeWithHeuristics(message, history = [], patientInfo = {}) {
     'hours', 'open', 'timing', 'location', 'address', 'parking', 'insurance', 'billing', 'cost', 'where are you'
   ];
 
-  const isCritical = criticalKeywords.some(kw => lowerMsg.includes(kw));
-  const isHigh = highKeywords.some(kw => lowerMsg.includes(kw));
-  const isMedium = mediumKeywords.some(kw => lowerMsg.includes(kw));
-  const isScheduling = schedulingKeywords.some(kw => lowerMsg.includes(kw));
-  const isFaq = faqKeywords.some(kw => lowerMsg.includes(kw));
+  const symptomKeywords = [
+    'headache', 'fever', 'cough', 'cold', 'sore throat', 'pain', 'ache', 'nausea', 'vomit', 'stomach',
+    'sick', 'dizzy', 'tired', 'rash', 'allergy', 'hurt', 'flu', 'covid', 'infection'
+  ];
 
-  if (isCritical) {
+  if (criticalKeywords.some(kw => lowerMsg.includes(kw))) {
     return {
-      replyText: "I understand how distressing this is. Because you mentioned symptoms such as chest pain or breathing difficulty, I am immediately connecting you to our on-call triage nurse and notifying emergency support. Please remain calm and seated while our medical team joins right away.",
+      replyText: "I understand how distressing this is. Because you mentioned critical symptoms such as chest pain or breathing difficulty, I am immediately connecting you to our on-call triage nurse and notifying emergency support. Please remain seated and calm while our medical team joins right away.",
       urgencyLevel: "critical",
       needsHandoff: true,
       clinicalSummary: `CRITICAL TRIAGE: Patient reported acute emergency symptoms: "${message}". Immediate human nursing assessment required.`
     };
   }
 
-  if (isHigh) {
+  if (highKeywords.some(kw => lowerMsg.includes(kw))) {
     return {
       replyText: "I hear how much discomfort you are experiencing. Because of the severity of these symptoms, I am alerting our triage nurse to review your case immediately. Please stay with me while we connect you.",
       urgencyLevel: "high",
@@ -103,7 +113,7 @@ function analyzeWithHeuristics(message, history = [], patientInfo = {}) {
     };
   }
 
-  if (isScheduling) {
+  if (schedulingKeywords.some(kw => lowerMsg.includes(kw))) {
     return {
       replyText: "I would be happy to help schedule your appointment! We have available slots with General Practice tomorrow at 10:00 AM, 2:30 PM, or Thursday at 11:15 AM. Which time works best for you, or would you prefer a telehealth consultation?",
       urgencyLevel: "low",
@@ -112,7 +122,7 @@ function analyzeWithHeuristics(message, history = [], patientInfo = {}) {
     };
   }
 
-  if (isFaq) {
+  if (faqKeywords.some(kw => lowerMsg.includes(kw))) {
     return {
       replyText: "Our main clinic is located at 742 Evergreen Healthcare Way, Suite 400. We are open Monday through Friday from 7:30 AM to 7:00 PM, and Saturday from 9:00 AM to 2:00 PM. We accept most major health insurance plans including Medicare, Blue Cross, and Aetna.",
       urgencyLevel: "low",
@@ -121,17 +131,17 @@ function analyzeWithHeuristics(message, history = [], patientInfo = {}) {
     };
   }
 
-  if (isMedium) {
+  if (symptomKeywords.some(kw => lowerMsg.includes(kw))) {
     return {
-      replyText: "I'm sorry to hear you're feeling under the weather with these symptoms. For minor illness or routine aches, rest and hydration are key. Would you like me to book a same-day or next-day consultation with one of our physicians to examine you?",
+      replyText: `I am sorry to hear you are dealing with ${message}. For mild or routine symptoms, rest and hydration are very helpful. If your symptoms worsen or persist, would you like me to schedule a visit with one of our physicians to examine you?`,
       urgencyLevel: "medium",
       needsHandoff: false,
-      clinicalSummary: ""
+      clinicalSummary: `Patient reported mild/moderate symptoms: "${message}".`
     };
   }
 
   return {
-    replyText: "Hello! I am HealthSync, your personal medical concierge. I can assist you with symptom triage, answering clinic and insurance questions, or scheduling your next visit. How can I help you feel better today?",
+    replyText: `Thank you for sharing that with me. I am here to assist with your symptoms, scheduling, or questions about our clinic. Could you describe your symptoms a bit more, or let me know how you are feeling?`,
     urgencyLevel: "low",
     needsHandoff: false,
     clinicalSummary: ""
@@ -139,52 +149,55 @@ function analyzeWithHeuristics(message, history = [], patientInfo = {}) {
 }
 
 export async function processMedicalChat({ patient, message, channel, history = [] }) {
-  // If API key is available, call Gemini models via @google/genai
-  if (aiClient) {
-    try {
-      // Format conversation history for Gemini
-      const formattedHistory = history.map(h => ({
-        role: h.sender_type === 'user' ? 'user' : 'model',
-        parts: [{ text: h.content }]
-      }));
+  const client = getAiClient();
 
-      const contextMessage = `Patient Information:
+  if (client) {
+    // Format conversation history for Gemini
+    const formattedHistory = history.map(h => ({
+      role: h.sender_type === 'user' ? 'user' : 'model',
+      parts: [{ text: h.content }]
+    }));
+
+    const contextMessage = `Patient Information:
 - Name: ${patient.full_name || 'Anonymous'}
 - DOB: ${patient.dob ? new Date(patient.dob).toLocaleDateString() : 'Unknown'}
 - Interaction Channel: ${channel}
 
 Latest Patient Input: "${message}"`;
 
-      const response = await aiClient.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-          ...formattedHistory,
-          { role: 'user', parts: [{ text: contextMessage }] }
-        ],
-        config: {
-          systemInstruction: SYSTEM_PROMPT,
-          responseMimeType: 'application/json',
-          responseSchema: RESPONSE_SCHEMA,
-          temperature: 0.2
-        }
-      });
+    // Try candidate models in order of availability
+    for (const model of CANDIDATE_MODELS) {
+      try {
+        const response = await client.models.generateContent({
+          model,
+          contents: [
+            ...formattedHistory,
+            { role: 'user', parts: [{ text: contextMessage }] }
+          ],
+          config: {
+            systemInstruction: SYSTEM_PROMPT,
+            responseMimeType: 'application/json',
+            responseSchema: RESPONSE_SCHEMA,
+            temperature: 0.3
+          }
+        });
 
-      const responseText = response.text;
-      if (responseText) {
-        const parsed = JSON.parse(responseText);
-        return {
-          replyText: parsed.replyText || "I'm here to support you. Let me check your symptoms.",
-          urgencyLevel: parsed.urgencyLevel || "low",
-          needsHandoff: Boolean(parsed.needsHandoff),
-          clinicalSummary: parsed.clinicalSummary || ""
-        };
+        if (response.text) {
+          const parsed = JSON.parse(response.text);
+          return {
+            replyText: parsed.replyText || "I'm here to support you. Let me check your symptoms.",
+            urgencyLevel: parsed.urgencyLevel || "low",
+            needsHandoff: Boolean(parsed.needsHandoff),
+            clinicalSummary: parsed.clinicalSummary || ""
+          };
+        }
+      } catch (error) {
+        console.warn(`Model ${model} failed, trying next candidate:`, error.message);
       }
-    } catch (error) {
-      console.error('Gemini API call failed, falling back to clinical heuristics:', error.message);
     }
   }
 
-  // Graceful fallback to empathetic clinical rules engine
+  // Graceful fallback to clinical rules engine
   return analyzeWithHeuristics(message, history, patient);
 }
 
