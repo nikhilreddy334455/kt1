@@ -6,6 +6,7 @@ export function useSpeech() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [ttsSupported, setTtsSupported] = useState(false);
+  const [voices, setVoices] = useState([]);
   
   const recognitionRef = useRef(null);
   const synthRef = useRef(null);
@@ -33,7 +34,10 @@ export function useSpeech() {
       };
 
       recognition.onerror = (event) => {
-        console.warn('Speech recognition event:', event.error);
+        // Ignore benign no-speech or abort events
+        if (event.error !== 'no-speech' && event.error !== 'aborted') {
+          console.warn('Speech recognition notice:', event.error);
+        }
         setIsListening(false);
       };
 
@@ -48,14 +52,32 @@ export function useSpeech() {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       setTtsSupported(true);
       synthRef.current = window.speechSynthesis;
+
+      const updateVoices = () => {
+        if (synthRef.current) {
+          const availableVoices = synthRef.current.getVoices();
+          if (availableVoices && availableVoices.length > 0) {
+            setVoices(availableVoices);
+          }
+        }
+      };
+
+      updateVoices();
+      if (window.speechSynthesis.onvoiceschanged !== undefined) {
+        window.speechSynthesis.onvoiceschanged = updateVoices;
+      }
     }
 
     return () => {
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        try {
+          recognitionRef.current.abort();
+        } catch (_) {}
       }
       if (synthRef.current) {
-        synthRef.current.cancel();
+        try {
+          synthRef.current.cancel();
+        } catch (_) {}
       }
     };
   }, []);
@@ -66,7 +88,11 @@ export function useSpeech() {
     try {
       recognitionRef.current.start();
     } catch (e) {
-      console.warn('Recognition start caught error:', e);
+      // In case recognition was already active, restart it
+      try {
+        recognitionRef.current.stop();
+        setTimeout(() => recognitionRef.current?.start(), 100);
+      } catch (_) {}
     }
   }, []);
 
@@ -74,9 +100,7 @@ export function useSpeech() {
     if (!recognitionRef.current) return;
     try {
       recognitionRef.current.stop();
-    } catch (e) {
-      console.warn('Recognition stop caught error:', e);
-    }
+    } catch (_) {}
     setIsListening(false);
   }, []);
 
@@ -86,48 +110,81 @@ export function useSpeech() {
 
   const speak = useCallback((text, onEnd) => {
     if (!synthRef.current || !text) return;
-    
-    // Stop any ongoing speech
-    synthRef.current.cancel();
 
-    // Clean text of markdown or special chars for cleaner voice
-    const cleanText = text.replace(/[*#_`]/g, '').trim();
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    
-    utterance.rate = 0.95; // Calm, empathetic pacing
-    utterance.pitch = 1.0;
+    try {
+      // Unfreeze browser speech engine if paused
+      if (synthRef.current.paused) {
+        synthRef.current.resume();
+      }
 
-    // Select pleasant natural voice if available
-    const voices = synthRef.current.getVoices();
-    const preferredVoice = voices.find(v => 
-      (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Samantha') || v.name.includes('Karen')) && 
-      v.lang.startsWith('en')
-    );
-    if (preferredVoice) {
-      utterance.voice = preferredVoice;
+      // Cancel previous speech (normal browser behavior)
+      synthRef.current.cancel();
+
+      // Clean text of markdown, URLs, or special chars
+      const cleanText = text
+        .replace(/[*#_`~]/g, '')
+        .replace(/https?:\/\/\S+/g, '')
+        .trim();
+
+      if (!cleanText) return;
+
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utterance.rate = 0.95; // Calm, empathetic pacing
+      utterance.pitch = 1.0;
+      utterance.lang = 'en-US';
+
+      // Pick best natural voice if available
+      const voiceList = voices.length > 0 ? voices : synthRef.current.getVoices();
+      if (voiceList && voiceList.length > 0) {
+        const preferredVoice = voiceList.find(v => 
+          (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Victoria')) &&
+          v.lang.startsWith('en')
+        ) || voiceList.find(v => v.lang.startsWith('en'));
+
+        if (preferredVoice) {
+          utterance.voice = preferredVoice;
+        }
+      }
+
+      utterance.onstart = () => {
+        setIsSpeaking(true);
+      };
+
+      utterance.onend = () => {
+        setIsSpeaking(false);
+        if (onEnd) onEnd();
+      };
+
+      utterance.onerror = (e) => {
+        // 'canceled' and 'interrupted' are standard browser events when audio is stopped or replaced
+        if (e.error === 'canceled' || e.error === 'interrupted') {
+          setIsSpeaking(false);
+          return;
+        }
+
+        // 'not-allowed' happens if browser autoplay policy blocks automatic speech without direct tap
+        if (e.error === 'not-allowed') {
+          setIsSpeaking(false);
+          return;
+        }
+
+        console.warn('Speech synthesis event notice:', e.error);
+        setIsSpeaking(false);
+        if (onEnd) onEnd();
+      };
+
+      synthRef.current.speak(utterance);
+    } catch (err) {
+      console.warn('SpeechSynthesis invocation exception:', err.message);
+      setIsSpeaking(false);
     }
-
-    utterance.onstart = () => {
-      setIsSpeaking(true);
-    };
-
-    utterance.onend = () => {
-      setIsSpeaking(false);
-      if (onEnd) onEnd();
-    };
-
-    utterance.onerror = (e) => {
-      console.warn('TTS utterance error:', e);
-      setIsSpeaking(false);
-      if (onEnd) onEnd();
-    };
-
-    synthRef.current.speak(utterance);
-  }, []);
+  }, [voices]);
 
   const stopSpeaking = useCallback(() => {
     if (synthRef.current) {
-      synthRef.current.cancel();
+      try {
+        synthRef.current.cancel();
+      } catch (_) {}
       setIsSpeaking(false);
     }
   }, []);
