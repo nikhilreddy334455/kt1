@@ -1,5 +1,64 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+// Select the highest-quality, clearest natural human voice
+function selectBestVoice(voiceList, targetLang) {
+  if (!voiceList || voiceList.length === 0) return null;
+
+  const target = targetLang.toLowerCase().replace('_', '-');
+  const langPrefix = target.split('-')[0];
+
+  // Exclude distorted, robotic, or novelty synthesizer voices
+  const noveltyVoices = [
+    'albert', 'bad news', 'bahh', 'bells', 'boing', 'bubbles', 'cellos',
+    'deranged', 'good news', 'hysterical', 'pipe organ', 'trinoids',
+    'whisper', 'zarvox', 'fred', 'junior', 'ralph', 'wobble', 'sin-sin'
+  ];
+
+  const validVoices = voiceList.filter(v => {
+    const nameLower = v.name.toLowerCase();
+    return !noveltyVoices.some(n => nameLower.includes(n));
+  });
+
+  const candidates = validVoices.filter(v => {
+    const vLang = v.lang.toLowerCase().replace('_', '-');
+    return vLang.startsWith(target) || vLang.startsWith(langPrefix);
+  });
+
+  if (candidates.length === 0) return null;
+
+  // Clear, natural, studio-quality voices (Samantha, Google US English, Daniel, Karen, etc.)
+  const preferredEnglishNames = [
+    'samantha',
+    'google us english',
+    'google uk english female',
+    'google uk english male',
+    'daniel',
+    'karen',
+    'serena',
+    'victoria',
+    'moira',
+    'tessa',
+    'ava',
+    'allison',
+    'tom',
+    'microsoft jenny',
+    'microsoft guy',
+    'microsoft aria',
+    'natural',
+    'premium',
+    'enhanced'
+  ];
+
+  for (const pref of preferredEnglishNames) {
+    const match = candidates.find(v => v.name.toLowerCase().includes(pref));
+    if (match) return match;
+  }
+
+  // Fallback to default candidate or first valid candidate
+  const defaultCandidate = candidates.find(v => v.default);
+  return defaultCandidate || candidates[0];
+}
+
 export function useSpeech() {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
@@ -98,13 +157,13 @@ export function useSpeech() {
       recognitionRef.current.start();
     } catch (e) {
       try {
-        recognitionRef.current.stop();
+        recognitionRef.current.abort();
         setTimeout(() => {
-          if (recognitionRef.current) {
+          try {
             recognitionRef.current.lang = language;
             recognitionRef.current.start();
-          }
-        }, 100);
+          } catch (_) {}
+        }, 150);
       } catch (_) {}
     }
   }, [language]);
@@ -130,7 +189,7 @@ export function useSpeech() {
         synthRef.current.resume();
       }
 
-      // Cancel previous speech (normal browser behavior)
+      // Cancel previous speech safely
       synthRef.current.cancel();
 
       // Clean text of markdown, URLs, or special chars
@@ -143,23 +202,16 @@ export function useSpeech() {
 
       const targetLang = customLang || language;
       const utterance = new SpeechSynthesisUtterance(cleanText);
-      utterance.rate = 0.95; // Calm, empathetic pacing
-      utterance.pitch = 1.0;
+      utterance.rate = 1.0; // Clear, natural, articulate human speed
+      utterance.pitch = 1.0; // Natural voice pitch
+      utterance.volume = 1.0; // Full clarity
       utterance.lang = targetLang;
 
-      // Pick matching voice for selected language
+      // Pick matching high-clarity voice for selected language
       const voiceList = voices.length > 0 ? voices : synthRef.current.getVoices();
-      if (voiceList && voiceList.length > 0) {
-        const langPrefix = targetLang.split('-')[0].toLowerCase();
-        const matchingVoice = voiceList.find(v => 
-          v.lang.toLowerCase().replace('_', '-').startsWith(targetLang.toLowerCase())
-        ) || voiceList.find(v => 
-          v.lang.toLowerCase().replace('_', '-').startsWith(langPrefix)
-        );
-
-        if (matchingVoice) {
-          utterance.voice = matchingVoice;
-        }
+      const bestVoice = selectBestVoice(voiceList, targetLang);
+      if (bestVoice) {
+        utterance.voice = bestVoice;
       }
 
       utterance.onstart = () => {
