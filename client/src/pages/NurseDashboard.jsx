@@ -14,6 +14,7 @@ import {
   Clock,
   Filter
 } from 'lucide-react';
+import { apiUrl } from '../config/api';
 
 export default function NurseDashboard() {
   const [alerts, setAlerts] = useState([]);
@@ -27,8 +28,8 @@ export default function NurseDashboard() {
   const fetchAlertsAndStats = async () => {
     try {
       const [alertsRes, statsRes] = await Promise.all([
-        fetch(`/api/admin/alerts?status=${filter}`),
-        fetch('/api/admin/stats')
+        fetch(apiUrl(`/api/admin/alerts?status=${filter}`)),
+        fetch(apiUrl('/api/admin/stats'))
       ]);
 
       const alertsData = await alertsRes.json();
@@ -59,7 +60,7 @@ export default function NurseDashboard() {
   const handleResolveAlert = async (alertId) => {
     try {
       setResolvingId(alertId);
-      const res = await fetch('/api/admin/resolve-alert', {
+      const res = await fetch(apiUrl('/api/admin/resolve-alert'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ alertId })

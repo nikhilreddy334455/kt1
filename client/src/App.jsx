@@ -9,6 +9,7 @@ import {
   HelpCircle,
   ExternalLink
 } from 'lucide-react';
+import { apiUrl } from './config/api';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState('patient'); // 'patient' | 'dashboard'
@@ -17,7 +18,7 @@ export default function App() {
   // Poll for alert counts to show indicator badge on Nurse Dashboard tab
   useEffect(() => {
     const fetchBadge = () => {
-      fetch('/api/admin/stats')
+      fetch(apiUrl('/api/admin/stats'))
         .then(res => res.json())
         .then(data => {
           if (data.stats) {

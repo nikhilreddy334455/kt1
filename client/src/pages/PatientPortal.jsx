@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Info
 } from 'lucide-react';
+import { apiUrl } from '../config/api';
 
 export default function PatientPortal() {
   const [patient, setPatient] = useState(null);
@@ -45,7 +46,7 @@ export default function PatientPortal() {
 
   // Load demo patients on mount
   useEffect(() => {
-    fetch('/api/auth/patients')
+    fetch(apiUrl('/api/auth/patients'))
       .then(res => res.json())
       .then(data => {
         if (data.patients && data.patients.length > 0) {
@@ -72,7 +73,7 @@ export default function PatientPortal() {
 
   const loadConversation = async (patientId) => {
     try {
-      const res = await fetch(`/api/conversations/${patientId}`);
+      const res = await fetch(apiUrl(`/api/conversations/${patientId}`));
       const data = await res.json();
       if (data.conversation) {
         setConversation(data.conversation);
@@ -94,7 +95,7 @@ export default function PatientPortal() {
     if (!phoneInput) return;
     try {
       setLoading(true);
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -136,7 +137,7 @@ export default function PatientPortal() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -175,7 +176,7 @@ export default function PatientPortal() {
     if (!patient?.id) return;
     try {
       setLoading(true);
-      const res = await fetch('/api/conversations/reset', {
+      const res = await fetch(apiUrl('/api/conversations/reset'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ patientId: patient.id })
