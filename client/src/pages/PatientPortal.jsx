@@ -21,13 +21,20 @@ import {
 } from 'lucide-react';
 import { apiUrl } from '../config/api';
 
-export default function PatientPortal() {
-  const [patient, setPatient] = useState(null);
+export default function PatientPortal({ currentUser, onOpenAuth }) {
+  const [patient, setPatient] = useState(currentUser || null);
   const [patientsList, setPatientsList] = useState([]);
   const [phoneInput, setPhoneInput] = useState('');
   const [nameInput, setNameInput] = useState('');
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [userToken, setUserToken] = useState(() => localStorage.getItem('healthsync_token'));
+
+  useEffect(() => {
+    if (currentUser) {
+      setPatient(currentUser);
+      setUserToken(localStorage.getItem('healthsync_token'));
+    }
+  }, [currentUser]);
   
   const [conversation, setConversation] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -305,7 +312,7 @@ export default function PatientPortal() {
             ) : (
               <button
                 type="button"
-                onClick={() => setIsAuthModalOpen(true)}
+                onClick={() => (onOpenAuth ? onOpenAuth() : setIsAuthModalOpen(true))}
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-teal-600 to-teal-700 hover:from-teal-700 hover:to-teal-800 text-white text-xs font-bold shadow-xs hover:shadow transition-all"
               >
                 <LogIn className="w-3.5 h-3.5" />
