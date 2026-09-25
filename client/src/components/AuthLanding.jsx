@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { apiUrl } from '../config/api';
 import { 
   HeartPulse, 
@@ -16,9 +16,9 @@ import {
   MessageSquare, 
   Activity,
   KeyRound,
-  ExternalLink,
   Copy,
-  Info
+  Info,
+  Clock
 } from 'lucide-react';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '384094224888-h8gc6s0k6q66q3glc9dtvv9l3hbbvpu5.apps.googleusercontent.com';
@@ -35,9 +35,37 @@ export default function AuthLanding({ onAuthSuccess }) {
   const [originNotice, setOriginNotice] = useState(false);
   const [copiedOrigin, setCopiedOrigin] = useState(false);
 
+  const tokenClientRef = useRef(null);
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 
-  // Copy current origin to clipboard for easy Google Console setup
+  // Pre-initialize Google OAuth client
+  useEffect(() => {
+    const initClient = () => {
+      if (window.google?.accounts?.oauth2 && !tokenClientRef.current) {
+        try {
+          tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: 'email profile openid',
+            callback: handleGoogleTokenResponse,
+            error_callback: handleGoogleError
+          });
+        } catch (e) {
+          console.warn('Google client init notice:', e);
+        }
+      }
+    };
+
+    initClient();
+    const interval = setInterval(() => {
+      if (window.google?.accounts?.oauth2) {
+        initClient();
+        clearInterval(interval);
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const handleCopyOrigin = () => {
     if (navigator.clipboard) {
       navigator.clipboard.writeText(currentOrigin);
@@ -46,80 +74,87 @@ export default function AuthLanding({ onAuthSuccess }) {
     }
   };
 
-  // Real Google OAuth Handler (Popup-based, eliminating automatic 403 iframe loads)
+  const handleGoogleError = (err) => {
+    setLoading(false);
+    console.warn('Google OAuth error:', err);
+    setOriginNotice(true);
+    setError(
+      `Google OAuth Notice: If you recently added "${currentOrigin}" to Google Console, Google takes 5 to 10 minutes to propagate the changes. You can sign in immediately using Email & Password below.`
+    );
+  };
+
+  const handleGoogleTokenResponse = async (tokenResponse) => {
+    if (tokenResponse?.error) {
+      setLoading(false);
+      setOriginNotice(true);
+      setError(
+        tokenResponse.error === 'origin_mismatch'
+          ? `Domain "${currentOrigin}" is still propagating in Google Cloud Console (takes 5-10 minutes). Please wait a few moments or sign in with Email & Password below.`
+          : `Google Sign-In: ${tokenResponse.error_description || tokenResponse.error}`
+      );
+      return;
+    }
+
+    if (tokenResponse?.access_token) {
+      try {
+        const res = await fetch(apiUrl('/api/auth/google'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accessToken: tokenResponse.access_token })
+        });
+
+        const data = await res.json().catch(() => ({ error: 'Server connection error' }));
+        if (!res.ok) throw new Error(data.error || 'Google authentication failed');
+
+        if (data.token) {
+          localStorage.setItem('healthsync_token', data.token);
+        }
+
+        setSuccessMsg(`Welcome, ${data.patient?.full_name || 'Patient'}!`);
+        setTimeout(() => {
+          onAuthSuccess(data.patient);
+        }, 500);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setLoading(false);
+    }
+  };
+
+  // Trigger Google OAuth popup synchronously on click
   const handleGoogleSignIn = () => {
     setError(null);
     setSuccessMsg(null);
 
-    if (!window.google?.accounts?.oauth2) {
-      setError('Google Sign-In is initializing. If you have an adblocker active, please disable it or use Email & Password below.');
-      return;
+    if (!tokenClientRef.current) {
+      if (window.google?.accounts?.oauth2) {
+        try {
+          tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: 'email profile openid',
+            callback: handleGoogleTokenResponse,
+            error_callback: handleGoogleError
+          });
+        } catch (e) {
+          setError('Google Sign-In is initializing. Please use Email & Password below.');
+          return;
+        }
+      } else {
+        setError('Google services are still loading. Please try again in a few seconds or use Email & Password below.');
+        return;
+      }
     }
 
     try {
       setLoading(true);
-
-      const tokenClient = window.google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: 'email profile openid',
-        callback: async (tokenResponse) => {
-          if (tokenResponse?.error) {
-            setLoading(false);
-            if (tokenResponse.error === 'origin_mismatch' || tokenResponse.error_description?.includes('origin')) {
-              setOriginNotice(true);
-              setError(`Domain "${currentOrigin}" is not yet registered in Google Cloud Console.`);
-            } else {
-              setError(`Google Sign-In notice: ${tokenResponse.error_description || tokenResponse.error}`);
-            }
-            return;
-          }
-
-          if (tokenResponse?.access_token) {
-            try {
-              const res = await fetch(apiUrl('/api/auth/google'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ accessToken: tokenResponse.access_token })
-              });
-
-              const data = await res.json().catch(() => ({ error: 'Server connection error' }));
-              if (!res.ok) throw new Error(data.error || 'Google authentication failed');
-
-              if (data.token) {
-                localStorage.setItem('healthsync_token', data.token);
-              }
-
-              setSuccessMsg(`Welcome, ${data.patient?.full_name || 'Patient'}!`);
-              setTimeout(() => {
-                onAuthSuccess(data.patient);
-              }, 500);
-            } catch (err) {
-              setError(err.message);
-            } finally {
-              setLoading(false);
-            }
-          } else {
-            setLoading(false);
-          }
-        },
-        error_callback: (err) => {
-          setLoading(false);
-          console.warn('Google OAuth prompt notice:', err);
-          if (err?.type === 'origin_mismatch' || err?.message?.includes('origin')) {
-            setOriginNotice(true);
-            setError(`Domain "${currentOrigin}" is not yet in Google Console Authorized JavaScript origins.`);
-          } else {
-            setError('Google sign-in popup was closed or unavailable. Please sign in with Email & Password below.');
-          }
-        }
-      });
-
-      tokenClient.requestAccessToken({ prompt: 'select_account' });
+      tokenClientRef.current.requestAccessToken({ prompt: 'select_account' });
     } catch (err) {
       setLoading(false);
-      console.error('Google OAuth initialization exception:', err);
-      setOriginNotice(true);
-      setError('Google Sign-In popup could not open. Please use Email & Password below.');
+      console.error('Google OAuth request error:', err);
+      setError('Unable to open Google Sign-In popup. Please use Email & Password below.');
     }
   };
 
@@ -295,11 +330,11 @@ export default function AuthLanding({ onAuthSuccess }) {
           {originNotice && (
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 space-y-2 animate-in fade-in">
               <div className="flex items-center gap-1.5 font-bold text-amber-900">
-                <Info className="w-3.5 h-3.5 flex-shrink-0 text-amber-600" />
-                <span>Google Console Domain Setup</span>
+                <Clock className="w-3.5 h-3.5 flex-shrink-0 text-amber-600" />
+                <span>Google Console Propagation & Origin Setup</span>
               </div>
               <p className="text-amber-700 leading-relaxed">
-                To allow Google Sign-In on this domain, add this origin to <strong>Authorized JavaScript origins</strong> in Google Cloud Console:
+                If you just updated Google Cloud Console, <strong>Google takes 5 to 10 minutes</strong> to propagate changes to its OAuth servers.
               </p>
               <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-amber-200 font-mono text-[10px]">
                 <span className="truncate">{currentOrigin}</span>
@@ -312,8 +347,8 @@ export default function AuthLanding({ onAuthSuccess }) {
                   <span>{copiedOrigin ? 'Copied!' : 'Copy'}</span>
                 </button>
               </div>
-              <p className="text-[10px] text-amber-600">
-                Or sign in securely with <strong>Email & Password</strong> below right away.
+              <p className="text-[10px] text-teal-800 font-semibold bg-teal-50 p-2 rounded-lg border border-teal-200">
+                💡 Tip: You do not need to wait for Google! You can create an account or sign in with <strong>Email & Password</strong> below immediately.
               </p>
             </div>
           )}

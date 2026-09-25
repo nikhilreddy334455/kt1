@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { apiUrl } from '../config/api';
 import { 
   X, 
@@ -14,7 +14,8 @@ import {
   KeyRound,
   ShieldCheck,
   Copy,
-  Info
+  Info,
+  Clock
 } from 'lucide-react';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '384094224888-h8gc6s0k6q66q3glc9dtvv9l3hbbvpu5.apps.googleusercontent.com';
@@ -31,14 +32,44 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
   const [originNotice, setOriginNotice] = useState(false);
   const [copiedOrigin, setCopiedOrigin] = useState(false);
 
+  const tokenClientRef = useRef(null);
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 
-  // Clear state on modal open/tab change
   useEffect(() => {
     setError(null);
     setSuccessMsg(null);
     setOriginNotice(false);
   }, [tab, isOpen]);
+
+  // Pre-initialize Google OAuth client
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const initClient = () => {
+      if (window.google?.accounts?.oauth2 && !tokenClientRef.current) {
+        try {
+          tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: 'email profile openid',
+            callback: handleGoogleTokenResponse,
+            error_callback: handleGoogleError
+          });
+        } catch (e) {
+          console.warn('Google client init notice:', e);
+        }
+      }
+    };
+
+    initClient();
+    const interval = setInterval(() => {
+      if (window.google?.accounts?.oauth2) {
+        initClient();
+        clearInterval(interval);
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [isOpen]);
 
   const handleCopyOrigin = () => {
     if (navigator.clipboard) {
@@ -48,85 +79,90 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
     }
   };
 
-  // Real Google OAuth Handler (Popup-based, eliminating automatic 403 iframe loads)
+  const handleGoogleError = (err) => {
+    setLoading(false);
+    console.warn('Google OAuth modal notice:', err);
+    setOriginNotice(true);
+    setError(
+      `Google OAuth Notice: If you recently added "${currentOrigin}" to Google Console, Google takes 5 to 10 minutes to propagate the changes. You can sign in immediately using Email & Password below.`
+    );
+  };
+
+  const handleGoogleTokenResponse = async (tokenResponse) => {
+    if (tokenResponse?.error) {
+      setLoading(false);
+      setOriginNotice(true);
+      setError(
+        tokenResponse.error === 'origin_mismatch'
+          ? `Domain "${currentOrigin}" is still propagating in Google Cloud Console (takes 5-10 minutes). Please wait a few moments or sign in with Email & Password below.`
+          : `Google Sign-In: ${tokenResponse.error_description || tokenResponse.error}`
+      );
+      return;
+    }
+
+    if (tokenResponse?.access_token) {
+      try {
+        const res = await fetch(apiUrl('/api/auth/google'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accessToken: tokenResponse.access_token })
+        });
+
+        const data = await res.json().catch(() => ({ error: 'Server connection error' }));
+        if (!res.ok) throw new Error(data.error || 'Google authentication failed');
+
+        if (data.token) {
+          localStorage.setItem('healthsync_token', data.token);
+        }
+
+        setSuccessMsg(`Welcome, ${data.patient?.full_name || 'Patient'}!`);
+        setTimeout(() => {
+          onAuthSuccess(data.patient);
+          onClose();
+        }, 500);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setLoading(false);
+    }
+  };
+
   const handleGoogleSignIn = () => {
     setError(null);
     setSuccessMsg(null);
 
-    if (!window.google?.accounts?.oauth2) {
-      setError('Google Sign-In is initializing. Please try again or use Email & Password below.');
-      return;
+    if (!tokenClientRef.current) {
+      if (window.google?.accounts?.oauth2) {
+        try {
+          tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: 'email profile openid',
+            callback: handleGoogleTokenResponse,
+            error_callback: handleGoogleError
+          });
+        } catch (e) {
+          setError('Google Sign-In is initializing. Please use Email & Password below.');
+          return;
+        }
+      } else {
+        setError('Google services are still loading. Please try again or use Email & Password below.');
+        return;
+      }
     }
 
     try {
       setLoading(true);
-
-      const tokenClient = window.google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: 'email profile openid',
-        callback: async (tokenResponse) => {
-          if (tokenResponse?.error) {
-            setLoading(false);
-            if (tokenResponse.error === 'origin_mismatch' || tokenResponse.error_description?.includes('origin')) {
-              setOriginNotice(true);
-              setError(`Domain "${currentOrigin}" is not yet registered in Google Cloud Console.`);
-            } else {
-              setError(`Google Sign-In notice: ${tokenResponse.error_description || tokenResponse.error}`);
-            }
-            return;
-          }
-
-          if (tokenResponse?.access_token) {
-            try {
-              const res = await fetch(apiUrl('/api/auth/google'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ accessToken: tokenResponse.access_token })
-              });
-
-              const data = await res.json().catch(() => ({ error: 'Server connection error' }));
-              if (!res.ok) throw new Error(data.error || 'Google authentication failed');
-
-              if (data.token) {
-                localStorage.setItem('healthsync_token', data.token);
-              }
-
-              setSuccessMsg(`Welcome, ${data.patient?.full_name || 'Patient'}!`);
-              setTimeout(() => {
-                onAuthSuccess(data.patient);
-                onClose();
-              }, 500);
-            } catch (err) {
-              setError(err.message);
-            } finally {
-              setLoading(false);
-            }
-          } else {
-            setLoading(false);
-          }
-        },
-        error_callback: (err) => {
-          setLoading(false);
-          console.warn('Google OAuth popup notice:', err);
-          if (err?.type === 'origin_mismatch' || err?.message?.includes('origin')) {
-            setOriginNotice(true);
-            setError(`Domain "${currentOrigin}" is not yet registered in Google Cloud Console.`);
-          } else {
-            setError('Google sign-in popup was closed. Please use Email & Password below.');
-          }
-        }
-      });
-
-      tokenClient.requestAccessToken({ prompt: 'select_account' });
+      tokenClientRef.current.requestAccessToken({ prompt: 'select_account' });
     } catch (err) {
       setLoading(false);
-      console.error('Google OAuth initialization exception:', err);
-      setOriginNotice(true);
-      setError('Google Sign-In could not open. Please use Email & Password below.');
+      console.error('Google OAuth request error:', err);
+      setError('Unable to open Google Sign-In popup. Please use Email & Password below.');
     }
   };
 
-  // Secure Email & Password Submit Handler
   const handleEmailSubmit = async (e) => {
     e.preventDefault();
     setError(null);
@@ -199,7 +235,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-100 relative max-h-[94vh] overflow-y-auto">
-        {/* Close Button */}
         <button
           onClick={onClose}
           type="button"
@@ -209,7 +244,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           <X className="w-5 h-5" />
         </button>
 
-        {/* Modal Header */}
         <div className="text-center mb-6">
           <div className="w-12 h-12 rounded-2xl bg-teal-50 border border-teal-200 flex items-center justify-center text-teal-700 mx-auto mb-3 shadow-xs">
             <Sparkles className="w-6 h-6" />
@@ -224,7 +258,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           </p>
         </div>
 
-        {/* Tab Switcher */}
         <div className="flex bg-slate-100 p-1 rounded-xl mb-5">
           <button
             type="button"
@@ -250,7 +283,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           </button>
         </div>
 
-        {/* Feedback Alerts */}
         {error && (
           <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 flex items-start gap-2 text-xs text-rose-700 animate-in fade-in">
             <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
@@ -265,7 +297,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           </div>
         )}
 
-        {/* Native Official Google Sign-In Button */}
         <div className="mb-5 flex flex-col gap-2">
           <button
             type="button"
@@ -285,11 +316,11 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           {originNotice && (
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 space-y-2 animate-in fade-in">
               <div className="flex items-center gap-1.5 font-bold text-amber-900">
-                <Info className="w-3.5 h-3.5 flex-shrink-0 text-amber-600" />
-                <span>Google Console Domain Setup</span>
+                <Clock className="w-3.5 h-3.5 flex-shrink-0 text-amber-600" />
+                <span>Google Console Propagation</span>
               </div>
               <p className="text-amber-700 leading-relaxed">
-                Add this origin to <strong>Authorized JavaScript origins</strong> in Google Cloud Console:
+                If you recently saved this origin in Google Console, <strong>Google takes 5 to 10 minutes</strong> to propagate across its servers.
               </p>
               <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-amber-200 font-mono text-[10px]">
                 <span className="truncate">{currentOrigin}</span>
@@ -306,7 +337,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           )}
         </div>
 
-        {/* Divider */}
         <div className="relative flex items-center justify-center mb-5">
           <div className="border-t border-slate-200 w-full"></div>
           <span className="bg-white px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 absolute">
@@ -314,7 +344,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           </span>
         </div>
 
-        {/* Secure Email & Password Form */}
         <form onSubmit={handleEmailSubmit} className="space-y-3.5">
           {tab === 'signup' && (
             <div>
