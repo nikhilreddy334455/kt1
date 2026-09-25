@@ -277,16 +277,25 @@ export default function AuthLanding({ onAuthSuccess }) {
             <span>{loading ? 'Connecting to Google...' : 'Continue with Google'}</span>
           </button>
 
-          {/* Quick Origin Helper */}
-          <div className="flex items-center justify-between px-2 text-[10px] text-slate-400">
-            <span>Authorized Origin: <strong className="text-slate-600">{currentOrigin}</strong></span>
-            <button
-              type="button"
-              onClick={handleCopyOrigin}
-              className="text-teal-700 hover:text-teal-800 font-bold ml-1"
-            >
-              {copiedOrigin ? 'Copied' : 'Copy'}
-            </button>
+          {/* Quick Redirect URI Helper */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-[11px] text-slate-600 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-700">Redirect URI to add in Google Console:</span>
+              <button
+                type="button"
+                onClick={handleCopyOrigin}
+                className="text-teal-700 hover:text-teal-900 font-bold flex items-center gap-1"
+              >
+                <Copy className="w-3 h-3" />
+                <span>{copiedOrigin ? 'Copied!' : 'Copy URI'}</span>
+              </button>
+            </div>
+            <div className="font-mono text-[10px] bg-white px-2 py-1 rounded border border-slate-200 text-slate-800 break-all select-all">
+              {currentOrigin}
+            </div>
+            <p className="text-[10px] text-slate-400 leading-tight">
+              Paste this under <strong>Authorized redirect URIs</strong> in Google Cloud Console.
+            </p>
           </div>
         </div>
 
