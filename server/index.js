@@ -94,7 +94,15 @@ app.listen(PORT, async () => {
     const schemaSql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
     const { pool } = await import('./db.js');
     await pool.query(schemaSql);
-    console.log('Database tables verified on startup.');
+    // Ensure new auth columns exist
+    await pool.query(`
+      ALTER TABLE patients ADD COLUMN IF NOT EXISTS email VARCHAR(255) UNIQUE;
+      ALTER TABLE patients ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);
+      ALTER TABLE patients ADD COLUMN IF NOT EXISTS google_id VARCHAR(255);
+      ALTER TABLE patients ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+      ALTER TABLE patients ALTER COLUMN phone_number DROP NOT NULL;
+    `);
+    console.log('Database tables and auth schema verified on startup.');
 
     // Ensure initial patients exist
     const countRes = await pool.query('SELECT COUNT(*) FROM patients');

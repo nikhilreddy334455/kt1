@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ChatMessage from '../components/ChatMessage';
 import VoiceController, { SUPPORTED_LANGUAGES } from '../components/VoiceController';
+import AuthModal from '../components/AuthModal';
 import useSpeech from '../hooks/useSpeech';
 import { 
   Send, 
@@ -14,7 +15,9 @@ import {
   HeartPulse,
   Stethoscope,
   ChevronRight,
-  Info
+  Info,
+  LogIn,
+  LogOut
 } from 'lucide-react';
 import { apiUrl } from '../config/api';
 
@@ -23,6 +26,8 @@ export default function PatientPortal() {
   const [patientsList, setPatientsList] = useState([]);
   const [phoneInput, setPhoneInput] = useState('');
   const [nameInput, setNameInput] = useState('');
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [userToken, setUserToken] = useState(() => localStorage.getItem('healthsync_token'));
   
   const [conversation, setConversation] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -47,21 +52,50 @@ export default function PatientPortal() {
     speechSupported
   } = useSpeech();
 
-  // Load demo patients on mount
+  // Load demo patients or hydrate active user session from token
   useEffect(() => {
+    const token = localStorage.getItem('healthsync_token');
+    if (token) {
+      fetch(apiUrl('/api/auth/me'), {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.patient) {
+            setPatient(data.patient);
+            setUserToken(token);
+            return;
+          }
+          // If token invalid, remove it
+          localStorage.removeItem('healthsync_token');
+          setUserToken(null);
+        })
+        .catch(() => {});
+    }
+
+    // Load demo patients for switcher
     fetch(apiUrl('/api/auth/patients'))
       .then(res => res.json())
       .then(data => {
         if (data.patients && data.patients.length > 0) {
           setPatientsList(data.patients);
-          // Default to first patient
-          setPatient(data.patients[0]);
-          setPhoneInput(data.patients[0].phone_number);
-          setNameInput(data.patients[0].full_name);
+          if (!localStorage.getItem('healthsync_token')) {
+            setPatient(data.patients[0]);
+            setPhoneInput(data.patients[0].phone_number || '');
+            setNameInput(data.patients[0].full_name || '');
+          }
         }
       })
       .catch(err => console.error('Failed to load demo patients:', err));
   }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem('healthsync_token');
+    setUserToken(null);
+    if (patientsList.length > 0) {
+      setPatient(patientsList[0]);
+    }
+  };
 
   // Hydrate conversation when patient changes
   useEffect(() => {
@@ -244,15 +278,53 @@ export default function PatientPortal() {
             </div>
           </div>
 
-          {/* Quick Patient Switcher */}
+          {/* Account Profile / Sign In & Demo Switcher */}
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-slate-500">Switch Demo Patient:</span>
+            {userToken && patient?.email ? (
+              <div className="flex items-center gap-2 bg-teal-50/90 border border-teal-200 px-3 py-1.5 rounded-xl shadow-2xs">
+                {patient.avatar_url ? (
+                  <img src={patient.avatar_url} alt="" className="w-6 h-6 rounded-full ring-1 ring-teal-300" />
+                ) : (
+                  <div className="w-6 h-6 rounded-full bg-teal-700 text-white flex items-center justify-center text-xs font-bold">
+                    {patient.full_name?.charAt(0) || 'U'}
+                  </div>
+                )}
+                <div className="text-left">
+                  <div className="text-xs font-bold text-slate-800 leading-tight">{patient.full_name}</div>
+                  <div className="text-[10px] text-teal-700 leading-tight max-w-[120px] truncate">{patient.email}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  title="Sign out of your account"
+                  className="ml-1 p-1 text-slate-400 hover:text-rose-600 rounded-md hover:bg-white transition-colors"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsAuthModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-teal-600 to-teal-700 hover:from-teal-700 hover:to-teal-800 text-white text-xs font-bold shadow-xs hover:shadow transition-all"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Sign In / Sign Up</span>
+              </button>
+            )}
+
+            <div className="h-4 w-[1px] bg-slate-200 hidden sm:block mx-1"></div>
+
+            <span className="text-[11px] font-semibold text-slate-400">Demo Switcher:</span>
             {patientsList.map(p => (
               <button
                 key={p.id}
-                onClick={() => handleSelectDemoPatient(p)}
+                onClick={() => {
+                  if (userToken) handleLogout();
+                  handleSelectDemoPatient(p);
+                }}
                 className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all ${
-                  patient?.id === p.id
+                  patient?.id === p.id && !userToken
                     ? 'bg-teal-600 text-white border-teal-600 shadow-xs'
                     : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                 }`}
@@ -403,6 +475,16 @@ export default function PatientPortal() {
           </form>
         </div>
       </div>
+
+      {/* Google and Email Auth Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onAuthSuccess={(authenticatedPatient) => {
+          setPatient(authenticatedPatient);
+          setUserToken(localStorage.getItem('healthsync_token'));
+        }}
+      />
     </div>
   );
 }
