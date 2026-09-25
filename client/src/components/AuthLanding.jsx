@@ -36,7 +36,7 @@ export default function AuthLanding({ onAuthSuccess }) {
   const googleBtnContainerRef = useRef(null);
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 
-  // 1. Initialize Official Google Identity Services button & One Tap
+  // 1. Initialize Official Google Identity Services button
   useEffect(() => {
     let checkInterval = null;
 
@@ -48,6 +48,7 @@ export default function AuthLanding({ onAuthSuccess }) {
           callback: handleGoogleCredentialResponse,
           auto_select: false,
           cancel_on_tap_outside: true,
+          use_fedcm_for_prompt: true
         });
 
         googleBtnContainerRef.current.innerHTML = '';
@@ -62,11 +63,8 @@ export default function AuthLanding({ onAuthSuccess }) {
             logo_alignment: 'left'
           }
         );
-
-        // Also prompt One Tap if available
-        window.google.accounts.id.prompt(() => {});
       } catch (err) {
-        console.warn('Google GSI render error:', err);
+        console.warn('Google GSI render notice:', err);
       }
     };
 
@@ -84,7 +82,7 @@ export default function AuthLanding({ onAuthSuccess }) {
     return () => {
       if (checkInterval) clearInterval(checkInterval);
     };
-  }, [tab]);
+  }, []);
 
   // 2. Handle Google Credential Response (from Google's official iframe / One Tap)
   const handleGoogleCredentialResponse = async (response) => {

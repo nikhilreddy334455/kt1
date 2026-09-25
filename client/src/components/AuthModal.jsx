@@ -51,6 +51,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           callback: handleGoogleCredentialResponse,
           auto_select: false,
           cancel_on_tap_outside: true,
+          use_fedcm_for_prompt: true
         });
 
         googleBtnContainerRef.current.innerHTML = '';
