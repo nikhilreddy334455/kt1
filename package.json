@@ -1,0 +1,25 @@
+{
+  "name": "ai-medical-concierge",
+  "version": "1.0.0",
+  "description": "AI-Powered Omnichannel Medical Concierge with Voice, Triage & Nurse Dashboard",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "server": "node server/index.js",
+    "client": "npm --prefix client run dev",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "db:init": "node server/init-db.js",
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "@google/genai": "^2.24.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pg": "^8.13.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
