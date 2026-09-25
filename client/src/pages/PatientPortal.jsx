@@ -40,6 +40,7 @@ export default function PatientPortal() {
     stopListening,
     isSpeaking,
     speak,
+    primeAudio,
     stopSpeaking,
     speechSupported
   } = useSpeech();
@@ -122,6 +123,10 @@ export default function PatientPortal() {
 
   const sendMessage = async (messageText, channel = 'text') => {
     if (!messageText.trim() || !patient?.id || loading) return;
+
+    if (channel === 'voice') {
+      primeAudio();
+    }
 
     // Optimistically show user message
     const tempUserMsg = {

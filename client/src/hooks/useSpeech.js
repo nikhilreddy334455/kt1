@@ -155,30 +155,28 @@ export function useSpeech() {
         if (onEnd) onEnd();
       };
 
-      utterance.onerror = (e) => {
-        // 'canceled' and 'interrupted' are standard browser events when audio is stopped or replaced
-        if (e.error === 'canceled' || e.error === 'interrupted') {
-          setIsSpeaking(false);
-          return;
-        }
-
-        // 'not-allowed' happens if browser autoplay policy blocks automatic speech without direct tap
-        if (e.error === 'not-allowed') {
-          setIsSpeaking(false);
-          return;
-        }
-
-        console.warn('Speech synthesis event notice:', e.error);
+      utterance.onerror = () => {
         setIsSpeaking(false);
         if (onEnd) onEnd();
       };
 
       synthRef.current.speak(utterance);
-    } catch (err) {
-      console.warn('SpeechSynthesis invocation exception:', err.message);
+    } catch (_) {
       setIsSpeaking(false);
+      if (onEnd) onEnd();
     }
   }, [voices]);
+
+  const primeAudio = useCallback(() => {
+    if (synthRef.current) {
+      try {
+        if (synthRef.current.paused) synthRef.current.resume();
+        const silent = new SpeechSynthesisUtterance(' ');
+        silent.volume = 0;
+        synthRef.current.speak(silent);
+      } catch (_) {}
+    }
+  }, []);
 
   const stopSpeaking = useCallback(() => {
     if (synthRef.current) {
@@ -198,6 +196,7 @@ export function useSpeech() {
     resetTranscript,
     isSpeaking,
     speak,
+    primeAudio,
     stopSpeaking,
     speechSupported,
     ttsSupported
