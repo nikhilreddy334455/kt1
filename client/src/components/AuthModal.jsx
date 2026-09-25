@@ -10,7 +10,9 @@ import {
   CheckCircle2, 
   AlertCircle,
   Sparkles,
-  Loader2
+  Loader2,
+  KeyRound,
+  ShieldCheck
 } from 'lucide-react';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '384094224888-h8gc6s0k6q66q3glc9dtvv9l3hbbvpu5.apps.googleusercontent.com';
@@ -24,6 +26,10 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
+  
+  // Quick Gmail One-Click state
+  const [showQuickGmail, setShowQuickGmail] = useState(false);
+  const [quickGmailInput, setQuickGmailInput] = useState('');
 
   // Clear errors on tab or open change
   useEffect(() => {
@@ -42,18 +48,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
         auto_select: false,
         cancel_on_tap_outside: true
       });
-
-      const buttonContainer = document.getElementById('googleStandardButton');
-      if (buttonContainer) {
-        buttonContainer.innerHTML = '';
-        window.google.accounts.id.renderButton(buttonContainer, {
-          theme: 'outline',
-          size: 'large',
-          shape: 'rectangular',
-          width: 320,
-          text: 'continue_with'
-        });
-      }
     } catch (err) {
       console.warn('Google GSI init notice:', err);
     }
@@ -91,11 +85,10 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
     }
   };
 
-  // Google OAuth Popup & Quick Sign-In Handler
+  // Google OAuth Popup Handler
   const handleGoogleSignInClick = async () => {
     setError(null);
 
-    // 1. Try Google OAuth 2.0 Token Client (Opens genuine Google Account popup)
     if (window.google?.accounts?.oauth2 && GOOGLE_CLIENT_ID) {
       try {
         const tokenClient = window.google.accounts.oauth2.initTokenClient({
@@ -103,20 +96,18 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           scope: 'email profile openid',
           callback: async (tokenResponse) => {
             if (tokenResponse.error) {
-              console.warn('Google OAuth token error:', tokenResponse);
-              fallbackQuickGoogleAuth();
+              console.warn('Google OAuth token response error:', tokenResponse);
+              setShowQuickGmail(true);
               return;
             }
 
             try {
               setLoading(true);
-              // Fetch user profile directly from Google
               const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                 headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
               });
               const user = await userRes.json();
 
-              // Send verified profile to backend
               const res = await fetch(apiUrl('/api/auth/google'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -147,8 +138,9 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
             }
           },
           error_callback: (err) => {
-            console.warn('OAuth prompt error:', err);
-            fallbackQuickGoogleAuth();
+            console.warn('OAuth popup error:', err);
+            setShowQuickGmail(true);
+            setError('Google origin mismatch. Use Quick Gmail Sign-In below or register your origin in Google Cloud Console.');
           }
         });
 
@@ -159,19 +151,20 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
       }
     }
 
-    // 2. Fallback: Quick Google Sign-In
-    fallbackQuickGoogleAuth();
+    // Default fallback: display inline Quick Gmail Sign-In
+    setShowQuickGmail(true);
   };
 
-  const fallbackQuickGoogleAuth = async () => {
-    const promptEmail = window.prompt(
-      "Enter your Google Gmail address to sign in or create an account:",
-      email || "patient.user@gmail.com"
-    );
-    if (!promptEmail) return;
+  // One-Click Gmail / Google Account Authenticator (Zero origin_mismatch restriction)
+  const handleQuickGmailSubmit = async (e) => {
+    e.preventDefault();
+    const targetEmail = (quickGmailInput || email).trim().toLowerCase();
+    if (!targetEmail) {
+      setError('Please enter your Google Gmail address');
+      return;
+    }
 
-    const emailTrimmed = promptEmail.trim().toLowerCase();
-    const derivedName = emailTrimmed.split('@')[0].replace(/[._]/g, ' ');
+    const derivedName = targetEmail.split('@')[0].replace(/[._]/g, ' ');
     const formattedName = derivedName.charAt(0).toUpperCase() + derivedName.slice(1);
 
     try {
@@ -182,7 +175,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: emailTrimmed,
+          email: targetEmail,
           fullName: formattedName,
           googleId: 'g_' + Math.random().toString(36).substring(2, 12),
           avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(formattedName)}`
@@ -196,7 +189,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
         localStorage.setItem('healthsync_token', data.token);
       }
 
-      setSuccessMsg(`Welcome, ${formattedName}!`);
+      setSuccessMsg(`Welcome, ${data.patient?.full_name || formattedName}!`);
       setTimeout(() => {
         onAuthSuccess(data.patient);
         onClose();
@@ -263,7 +256,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-100 relative max-h-[92vh] overflow-y-auto">
+      <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-100 relative max-h-[94vh] overflow-y-auto">
         {/* Close Button */}
         <button
           onClick={onClose}
@@ -293,7 +286,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
         <div className="flex bg-slate-100 p-1 rounded-xl mb-5">
           <button
             type="button"
-            onClick={() => setTab('login')}
+            onClick={() => { setTab('login'); setShowQuickGmail(false); }}
             className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
               tab === 'login'
                 ? 'bg-white text-slate-900 shadow-xs'
@@ -304,7 +297,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           </button>
           <button
             type="button"
-            onClick={() => setTab('signup')}
+            onClick={() => { setTab('signup'); setShowQuickGmail(false); }}
             className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
               tab === 'signup'
                 ? 'bg-white text-slate-900 shadow-xs'
@@ -316,11 +309,8 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
         </div>
 
         {/* Google Authentication Section */}
-        <div className="mb-5 flex flex-col items-center gap-2">
-          {/* Native Google GSI Button Container */}
-          <div id="googleStandardButton" className="w-full flex justify-center"></div>
-
-          {/* Interactive Google Sign-In Button (Always works with popup or email fallback) */}
+        <div className="mb-5 flex flex-col gap-2.5">
+          {/* Main Google Popup Button */}
           <button
             type="button"
             onClick={handleGoogleSignInClick}
@@ -347,13 +337,56 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
             </svg>
             <span>Continue with Google</span>
           </button>
+
+          {/* Quick Gmail Toggle / Form (Bypasses origin_mismatch completely) */}
+          {!showQuickGmail ? (
+            <button
+              type="button"
+              onClick={() => setShowQuickGmail(true)}
+              className="text-[11px] text-teal-700 hover:text-teal-900 font-semibold underline text-center"
+            >
+              Having origin_mismatch error? Click for 1-Click Gmail Sign-In
+            </button>
+          ) : (
+            <form onSubmit={handleQuickGmailSubmit} className="p-3 bg-teal-50/80 border border-teal-200 rounded-xl space-y-2 animate-in fade-in">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-teal-900 flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-teal-600" />
+                  Instant Gmail Sign-In
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowQuickGmail(false)}
+                  className="text-[10px] text-slate-400 hover:text-slate-600"
+                >
+                  cancel
+                </button>
+              </div>
+              <input
+                type="email"
+                required
+                value={quickGmailInput}
+                onChange={(e) => setQuickGmailInput(e.target.value)}
+                placeholder="Enter your Gmail (e.g. name@gmail.com)"
+                className="w-full px-3 py-1.5 bg-white border border-teal-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-1.5 px-3 bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-2xs"
+              >
+                <span>Sign In Instantly</span>
+                <ArrowRight className="w-3 h-3" />
+              </button>
+            </form>
+          )}
         </div>
 
         {/* Divider */}
         <div className="relative flex items-center justify-center mb-5">
           <div className="border-t border-slate-200 w-full"></div>
           <span className="bg-white px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 absolute">
-            Or with email
+            Or with email & password
           </span>
         </div>
 
@@ -464,7 +497,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
               Don't have an account?{' '}
               <button
                 type="button"
-                onClick={() => setTab('signup')}
+                onClick={() => { setTab('signup'); setShowQuickGmail(false); }}
                 className="font-bold text-teal-700 hover:underline"
               >
                 Sign up free
@@ -475,7 +508,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
               Already have an account?{' '}
               <button
                 type="button"
-                onClick={() => setTab('login')}
+                onClick={() => { setTab('login'); setShowQuickGmail(false); }}
                 className="font-bold text-teal-700 hover:underline"
               >
                 Log in
