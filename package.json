@@ -7,7 +7,7 @@
   "scripts": {
     "server": "node server/index.js",
     "client": "npm --prefix client run dev",
-    "build": "npm install && npm --prefix client install && npm --prefix client run build",
+    "build": "npm --prefix client install && npm --prefix client run build && mkdir -p dist && cp -r client/dist/* ./dist/",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "db:init": "node server/init-db.js",
     "start": "node server/index.js"
