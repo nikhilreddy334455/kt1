@@ -21,11 +21,30 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
+// Health check and diagnostic endpoint
+app.get('/api/health', async (req, res) => {
+  let dbStatus = 'disconnected';
+  let dbError = null;
+  let patientCount = 0;
+
+  try {
+    const { pool } = await import('./db.js');
+    const dbRes = await pool.query('SELECT COUNT(*) FROM patients');
+    patientCount = parseInt(dbRes.rows[0].count, 10);
+    dbStatus = 'connected';
+  } catch (err) {
+    dbError = err.message;
+  }
+
   res.json({
-    status: 'healthy',
+    status: dbStatus === 'connected' ? 'healthy' : 'degraded',
     service: 'HealthSync Medical Concierge API',
+    database: {
+      status: dbStatus,
+      patientCount,
+      hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
+      error: dbError
+    },
     timestamp: new Date().toISOString()
   });
 });
@@ -62,12 +81,36 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`====================================================`);
   console.log(`  HealthSync Medical Concierge Server is running!   `);
   console.log(`  Port: http://localhost:${PORT}                    `);
   console.log(`  Health check: http://localhost:${PORT}/api/health `);
   console.log(`====================================================`);
+
+  // Auto-initialize schema on startup
+  try {
+    const fs = await import('fs');
+    const schemaSql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+    const { pool } = await import('./db.js');
+    await pool.query(schemaSql);
+    console.log('Database tables verified on startup.');
+
+    // Ensure initial patients exist
+    const countRes = await pool.query('SELECT COUNT(*) FROM patients');
+    if (parseInt(countRes.rows[0].count, 10) === 0) {
+      await pool.query(`
+        INSERT INTO patients (phone_number, full_name, dob)
+        VALUES 
+          ('5551234567', 'Elena Rostova', '1988-04-12'),
+          ('5559876543', 'Marcus Vance', '1975-11-23'),
+          ('5554567890', 'Aisha Khan', '1992-08-30');
+      `);
+      console.log('Initial sample patients seeded.');
+    }
+  } catch (err) {
+    console.error('Database auto-initialization notice:', err.message);
+  }
 });
 
 export default app;
