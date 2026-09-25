@@ -18,7 +18,8 @@ import {
   KeyRound,
   Copy,
   Info,
-  Clock
+  Clock,
+  ExternalLink
 } from 'lucide-react';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '384094224888-h8gc6s0k6q66q3glc9dtvv9l3hbbvpu5.apps.googleusercontent.com';
@@ -38,9 +39,28 @@ export default function AuthLanding({ onAuthSuccess }) {
   const tokenClientRef = useRef(null);
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 
-  // Pre-initialize Google OAuth client
+  // Initialize Google OAuth & One Tap on mount
   useEffect(() => {
-    const initClient = () => {
+    let checkInterval = null;
+
+    const initGoogle = () => {
+      // 1. Initialize Google Identity One Tap
+      if (window.google?.accounts?.id) {
+        try {
+          window.google.accounts.id.initialize({
+            client_id: GOOGLE_CLIENT_ID,
+            callback: handleGoogleCredentialResponse,
+            auto_select: false,
+            cancel_on_tap_outside: true,
+          });
+          // Attempt prompt One Tap gracefully
+          window.google.accounts.id.prompt(() => {});
+        } catch (e) {
+          console.warn('Google One Tap init notice:', e);
+        }
+      }
+
+      // 2. Pre-initialize Google OAuth 2.0 Token Client for Popup Button
       if (window.google?.accounts?.oauth2 && !tokenClientRef.current) {
         try {
           tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
@@ -50,20 +70,25 @@ export default function AuthLanding({ onAuthSuccess }) {
             error_callback: handleGoogleError
           });
         } catch (e) {
-          console.warn('Google client init notice:', e);
+          console.warn('Google OAuth client init notice:', e);
         }
       }
     };
 
-    initClient();
-    const interval = setInterval(() => {
-      if (window.google?.accounts?.oauth2) {
-        initClient();
-        clearInterval(interval);
-      }
-    }, 500);
+    if (window.google) {
+      initGoogle();
+    } else {
+      checkInterval = setInterval(() => {
+        if (window.google) {
+          clearInterval(checkInterval);
+          initGoogle();
+        }
+      }, 400);
+    }
 
-    return () => clearInterval(interval);
+    return () => {
+      if (checkInterval) clearInterval(checkInterval);
+    };
   }, []);
 
   const handleCopyOrigin = () => {
@@ -74,24 +99,83 @@ export default function AuthLanding({ onAuthSuccess }) {
     }
   };
 
+  // Handler for ID Token (from One Tap)
+  const handleGoogleCredentialResponse = async (response) => {
+    if (!response?.credential) return;
+    setLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+
+    try {
+      const res = await fetch(apiUrl('/api/auth/google'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: response.credential })
+      });
+
+      const data = await res.json().catch(() => ({ error: 'Server connection error' }));
+      if (!res.ok) throw new Error(data.error || 'Google authentication failed');
+
+      if (data.token) {
+        localStorage.setItem('healthsync_token', data.token);
+      }
+
+      setSuccessMsg(`Welcome, ${data.patient?.full_name || 'Patient'}!`);
+      setTimeout(() => {
+        onAuthSuccess(data.patient);
+      }, 400);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Error callback for Google OAuth popup
   const handleGoogleError = (err) => {
     setLoading(false);
-    console.warn('Google OAuth error:', err);
-    setOriginNotice(true);
+    console.warn('Google OAuth prompt notice:', err);
+
+    const errType = err?.type || '';
+    const errMsg = err?.message || '';
+
+    if (errType === 'popup_failed_to_open') {
+      setError(
+        'The Google sign-in popup was blocked by your browser. Please click the popup icon in your browser address bar and allow popups, or sign in with Email & Password below.'
+      );
+      return;
+    }
+
+    if (errType === 'popup_closed') {
+      setError('Google sign-in popup was closed. Click Continue with Google to try again, or use Email & Password below.');
+      return;
+    }
+
+    if (errType === 'origin_mismatch' || errMsg.includes('origin')) {
+      setOriginNotice(true);
+      setError(
+        `Google Console Origin Notice: Domain "${currentOrigin}" may still be propagating in Google Cloud Console (takes 5-10 mins). You can sign in immediately using Email & Password below.`
+      );
+      return;
+    }
+
     setError(
-      `Google OAuth Notice: If you recently added "${currentOrigin}" to Google Console, Google takes 5 to 10 minutes to propagate the changes. You can sign in immediately using Email & Password below.`
+      'Google sign-in popup could not complete. Please ensure popups are allowed, or sign in with Email & Password below.'
     );
   };
 
+  // Success callback for Google OAuth popup
   const handleGoogleTokenResponse = async (tokenResponse) => {
     if (tokenResponse?.error) {
       setLoading(false);
-      setOriginNotice(true);
-      setError(
-        tokenResponse.error === 'origin_mismatch'
-          ? `Domain "${currentOrigin}" is still propagating in Google Cloud Console (takes 5-10 minutes). Please wait a few moments or sign in with Email & Password below.`
-          : `Google Sign-In: ${tokenResponse.error_description || tokenResponse.error}`
-      );
+      if (tokenResponse.error === 'origin_mismatch') {
+        setOriginNotice(true);
+        setError(
+          `Domain "${currentOrigin}" is still propagating in Google Cloud Console (takes 5-10 minutes). Please wait a few moments or sign in with Email & Password below.`
+        );
+      } else {
+        setError(`Google Sign-In: ${tokenResponse.error_description || tokenResponse.error}`);
+      }
       return;
     }
 
@@ -334,7 +418,7 @@ export default function AuthLanding({ onAuthSuccess }) {
                 <span>Google Console Propagation & Origin Setup</span>
               </div>
               <p className="text-amber-700 leading-relaxed">
-                If you just updated Google Cloud Console, <strong>Google takes 5 to 10 minutes</strong> to propagate changes to its OAuth servers.
+                If you recently updated Google Cloud Console, <strong>Google takes 5 to 10 minutes</strong> to propagate changes to its OAuth servers.
               </p>
               <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-amber-200 font-mono text-[10px]">
                 <span className="truncate">{currentOrigin}</span>
@@ -348,7 +432,7 @@ export default function AuthLanding({ onAuthSuccess }) {
                 </button>
               </div>
               <p className="text-[10px] text-teal-800 font-semibold bg-teal-50 p-2 rounded-lg border border-teal-200">
-                💡 Tip: You do not need to wait for Google! You can create an account or sign in with <strong>Email & Password</strong> below immediately.
+                💡 Tip: You can create an account or sign in with <strong>Email & Password</strong> below immediately.
               </p>
             </div>
           )}

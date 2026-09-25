@@ -66,7 +66,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
         initClient();
         clearInterval(interval);
       }
-    }, 500);
+    }, 400);
 
     return () => clearInterval(interval);
   }, [isOpen]);
@@ -82,21 +82,44 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
   const handleGoogleError = (err) => {
     setLoading(false);
     console.warn('Google OAuth modal notice:', err);
-    setOriginNotice(true);
-    setError(
-      `Google OAuth Notice: If you recently added "${currentOrigin}" to Google Console, Google takes 5 to 10 minutes to propagate the changes. You can sign in immediately using Email & Password below.`
-    );
+
+    const errType = err?.type || '';
+    const errMsg = err?.message || '';
+
+    if (errType === 'popup_failed_to_open') {
+      setError(
+        'The Google sign-in popup was blocked by your browser. Please allow popups for this site in your address bar, or sign in with Email & Password below.'
+      );
+      return;
+    }
+
+    if (errType === 'popup_closed') {
+      setError('Google sign-in popup was closed. Click Continue with Google to try again, or use Email & Password below.');
+      return;
+    }
+
+    if (errType === 'origin_mismatch' || errMsg.includes('origin')) {
+      setOriginNotice(true);
+      setError(
+        `Google Console Origin Notice: Domain "${currentOrigin}" may still be propagating in Google Cloud Console (takes 5-10 mins). You can sign in immediately using Email & Password below.`
+      );
+      return;
+    }
+
+    setError('Google sign-in popup could not complete. Please use Email & Password below.');
   };
 
   const handleGoogleTokenResponse = async (tokenResponse) => {
     if (tokenResponse?.error) {
       setLoading(false);
-      setOriginNotice(true);
-      setError(
-        tokenResponse.error === 'origin_mismatch'
-          ? `Domain "${currentOrigin}" is still propagating in Google Cloud Console (takes 5-10 minutes). Please wait a few moments or sign in with Email & Password below.`
-          : `Google Sign-In: ${tokenResponse.error_description || tokenResponse.error}`
-      );
+      if (tokenResponse.error === 'origin_mismatch') {
+        setOriginNotice(true);
+        setError(
+          `Domain "${currentOrigin}" is still propagating in Google Cloud Console (takes 5-10 minutes). Please wait a few moments or sign in with Email & Password below.`
+        );
+      } else {
+        setError(`Google Sign-In: ${tokenResponse.error_description || tokenResponse.error}`);
+      }
       return;
     }
 
