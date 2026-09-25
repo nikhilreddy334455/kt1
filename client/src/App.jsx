@@ -56,8 +56,15 @@ export default function App() {
       return;
     }
 
+    const controller = new AbortController();
+    const safetyTimeout = setTimeout(() => {
+      controller.abort();
+      setIsCheckingSession(false);
+    }, 3500);
+
     fetch(apiUrl('/api/auth/me'), {
-      headers: { Authorization: `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal
     })
       .then(res => res.json())
       .then(data => {
@@ -68,9 +75,10 @@ export default function App() {
         }
       })
       .catch(() => {
-        // In case of network glitch, keep session intact if valid
+        // If aborted or network glitch, fall through to login screen gracefully
       })
       .finally(() => {
+        clearTimeout(safetyTimeout);
         setIsCheckingSession(false);
       });
   }, []);
