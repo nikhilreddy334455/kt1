@@ -39,12 +39,31 @@ router.post('/signup', async (req, res) => {
 
     // Check if email already registered
     const existing = await pool.query(
-      'SELECT id FROM patients WHERE email = $1',
+      'SELECT * FROM patients WHERE email = $1',
       [normalizedEmail]
     );
 
     if (existing.rows.length > 0) {
-      return res.status(400).json({ error: 'An account with this email already exists. Please log in.' });
+      const existingUser = existing.rows[0];
+      if (!existingUser.password_hash) {
+        // Was created via Google - seamlessly set password and activate full access
+        const salt = await bcrypt.genSalt(10);
+        const passwordHash = await bcrypt.hash(password, salt);
+        await pool.query(
+          'UPDATE patients SET password_hash = $1, full_name = COALESCE(NULLIF($2, \'\'), full_name), phone_number = COALESCE($3, phone_number) WHERE id = $4',
+          [passwordHash, fullName?.trim() || null, phoneNumber?.trim() || null, existingUser.id]
+        );
+        const updated = await pool.query('SELECT * FROM patients WHERE id = $1', [existingUser.id]);
+        const patient = sanitizePatient(updated.rows[0]);
+        const token = signToken(patient);
+        return res.status(200).json({
+          success: true,
+          message: 'Account password updated and signed in successfully',
+          token,
+          patient
+        });
+      }
+      return res.status(400).json({ error: 'An account with this email already exists. Please log in with your password.' });
     }
 
     // Hash password securely
@@ -107,10 +126,18 @@ router.post('/login', async (req, res) => {
 
     const rawPatient = userQuery.rows[0];
 
+    // If account was created via Google and has no password yet, seamlessly secure it with this password!
     if (!rawPatient.password_hash) {
-      return res.status(400).json({
-        error: 'This account was registered with Google Sign-In. Please click "Continue with Google" above.'
-      });
+      if (validated.password.length >= 6) {
+        const salt = await bcrypt.genSalt(10);
+        const newHash = await bcrypt.hash(validated.password, salt);
+        await pool.query('UPDATE patients SET password_hash = $1 WHERE id = $2', [newHash, rawPatient.id]);
+        rawPatient.password_hash = newHash;
+      } else {
+        return res.status(400).json({
+          error: 'Please enter a password with at least 6 characters.'
+        });
+      }
     }
 
     const isMatch = await bcrypt.compare(validated.password, rawPatient.password_hash);

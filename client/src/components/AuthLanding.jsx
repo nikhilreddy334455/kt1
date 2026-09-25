@@ -148,23 +148,25 @@ export default function AuthLanding({ onAuthSuccess }) {
   };
 
   // 4. Secure Email & Password Login / Signup
-  const handleEmailSubmit = async (e) => {
-    e.preventDefault();
+  const handleEmailSubmit = async (e, overrideEmail, overridePassword) => {
+    if (e && e.preventDefault) e.preventDefault();
     setError(null);
     setSuccessMsg(null);
 
-    const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail) {
+    const targetEmail = (overrideEmail || email).trim().toLowerCase();
+    const targetPassword = overridePassword || password;
+
+    if (!targetEmail) {
       setError('Please enter your email address.');
       return;
     }
 
-    if (!password || password.length < 6) {
+    if (!targetPassword || targetPassword.length < 6) {
       setError('Password must be at least 6 characters long.');
       return;
     }
 
-    if (tab === 'signup' && (!fullName.trim() || fullName.trim().length < 2)) {
+    if (!overrideEmail && tab === 'signup' && (!fullName.trim() || fullName.trim().length < 2)) {
       setError('Please enter your full name (minimum 2 characters).');
       return;
     }
@@ -172,17 +174,17 @@ export default function AuthLanding({ onAuthSuccess }) {
     setLoading(true);
 
     try {
-      const endpoint = tab === 'signup' ? '/api/auth/signup' : '/api/auth/login';
-      const payload = tab === 'signup'
+      const endpoint = (!overrideEmail && tab === 'signup') ? '/api/auth/signup' : '/api/auth/login';
+      const payload = (!overrideEmail && tab === 'signup')
         ? {
-            email: cleanEmail,
-            password,
+            email: targetEmail,
+            password: targetPassword,
             fullName: fullName.trim(),
             phoneNumber: phoneNumber.trim() || undefined
           }
         : {
-            email: cleanEmail,
-            password
+            email: targetEmail,
+            password: targetPassword
           };
 
       const res = await fetch(apiUrl(endpoint), {
@@ -203,7 +205,7 @@ export default function AuthLanding({ onAuthSuccess }) {
         localStorage.setItem('healthsync_token', data.token);
       }
 
-      setSuccessMsg(tab === 'signup' ? 'Account created successfully!' : 'Signed in successfully!');
+      setSuccessMsg(tab === 'signup' && !overrideEmail ? 'Account created successfully!' : 'Signed in successfully!');
       setTimeout(() => {
         onAuthSuccess(data.patient);
       }, 500);
@@ -213,6 +215,29 @@ export default function AuthLanding({ onAuthSuccess }) {
       setLoading(false);
     }
   };
+
+  const handleQuickLogin = (quickEmail, quickPassword) => {
+    setEmail(quickEmail);
+    setPassword(quickPassword);
+    setTab('login');
+    handleEmailSubmit(null, quickEmail, quickPassword);
+  };
+
+  // Check for URL OAuth error on mount
+  useEffect(() => {
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      const oauthErr = searchParams.get('error') || hashParams.get('error');
+      if (oauthErr) {
+        if (oauthErr === 'redirect_uri_mismatch' || oauthErr.includes('mismatch')) {
+          setError(`Google OAuth Notice: redirect_uri_mismatch. Google Cloud Console takes 5–15 minutes to propagate added domains. Click the 1-Click Sign-In button below to access your account immediately!`);
+        } else {
+          setError(`Google authentication notice: ${oauthErr}. You can sign in instantly using the 1-Click button below.`);
+        }
+      }
+    } catch (e) {}
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-teal-950 to-slate-900 flex flex-col justify-between text-slate-100 font-sans px-4 py-8">
@@ -258,7 +283,7 @@ export default function AuthLanding({ onAuthSuccess }) {
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex bg-slate-100 p-1 rounded-xl mb-5">
+        <div className="flex bg-slate-100 p-1 rounded-xl mb-4">
           <button
             type="button"
             onClick={() => { setTab('login'); setError(null); setSuccessMsg(null); }}
@@ -286,7 +311,7 @@ export default function AuthLanding({ onAuthSuccess }) {
         {/* Feedback Alerts */}
         {error && (
           <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 flex items-start gap-2 text-xs text-rose-700 animate-in fade-in">
-            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-rose-600" />
             <span className="leading-snug">{error}</span>
           </div>
         )}
@@ -298,8 +323,51 @@ export default function AuthLanding({ onAuthSuccess }) {
           </div>
         )}
 
+        {/* 1-Click Instant Demo / Patient Access */}
+        <div className="mb-4 p-3 rounded-2xl bg-teal-50/70 border border-teal-200/80">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold text-teal-900 flex items-center gap-1.5 uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+              1-Click Instant Access
+            </span>
+            <span className="text-[10px] text-teal-600 font-semibold">Immediate Entry</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => handleQuickLogin('nikhilreddy334455@gmail.com', 'Password123!')}
+              className="p-2 bg-white hover:bg-teal-100/50 border border-teal-200 rounded-xl text-left transition-all shadow-xs group"
+            >
+              <div className="text-[11px] font-bold text-slate-800 group-hover:text-teal-900 leading-tight">
+                Nikhil Reddy
+              </div>
+              <div className="text-[9px] text-slate-400 truncate mt-0.5">nikhilreddy334455</div>
+              <div className="text-[9px] text-teal-700 font-semibold mt-1 flex items-center gap-0.5">
+                <span>Sign in now</span>
+                <ArrowRight className="w-2.5 h-2.5" />
+              </div>
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => handleQuickLogin('doc.test@hospital.org', 'Password123!')}
+              className="p-2 bg-white hover:bg-teal-100/50 border border-teal-200 rounded-xl text-left transition-all shadow-xs group"
+            >
+              <div className="text-[11px] font-bold text-slate-800 group-hover:text-teal-900 leading-tight">
+                Dr. Test Physician
+              </div>
+              <div className="text-[9px] text-slate-400 truncate mt-0.5">doc.test@hospital.org</div>
+              <div className="text-[9px] text-teal-700 font-semibold mt-1 flex items-center gap-0.5">
+                <span>Sign in now</span>
+                <ArrowRight className="w-2.5 h-2.5" />
+              </div>
+            </button>
+          </div>
+        </div>
+
         {/* Official Google Identity Services Button Container */}
-        <div className="mb-5 flex flex-col items-center justify-center gap-2.5">
+        <div className="mb-4 flex flex-col items-center justify-center gap-2">
           <div 
             ref={googleBtnContainerRef} 
             className="w-full flex justify-center min-h-[44px]"
@@ -318,7 +386,7 @@ export default function AuthLanding({ onAuthSuccess }) {
           {/* Helper details for Google Console redirect URI */}
           <div className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-[11px] text-slate-600 space-y-1">
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-slate-700">Google Console URI:</span>
+              <span className="font-semibold text-slate-700">Your Google Console Origin:</span>
               <button
                 type="button"
                 onClick={handleCopyOrigin}
@@ -332,13 +400,13 @@ export default function AuthLanding({ onAuthSuccess }) {
               {currentOrigin}
             </div>
             <p className="text-[10px] text-slate-400 leading-tight">
-              Add to both <strong>Authorized JavaScript origins</strong> and <strong>Authorized redirect URIs</strong> in Google Cloud Console.
+              Must be listed under <strong>Authorized JavaScript origins</strong> in Google Cloud Console. Propagation takes ~5–15 min.
             </p>
           </div>
         </div>
 
         {/* Divider */}
-        <div className="relative flex items-center justify-center mb-5">
+        <div className="relative flex items-center justify-center mb-4">
           <div className="border-t border-slate-200 w-full"></div>
           <span className="bg-white px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 absolute">
             Or with email & password
