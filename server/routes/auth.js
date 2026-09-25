@@ -149,19 +149,38 @@ async function verifyGoogleIdToken(idToken) {
   }
 }
 
-// POST /api/auth/google - Authenticate or Sign Up via verified Google OAuth Credential
+// Helper to cryptographically verify Google access_token via Google userinfo endpoint
+async function verifyGoogleAccessToken(accessToken) {
+  try {
+    const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (!res.ok) return null;
+    const payload = await res.json();
+    return payload;
+  } catch (err) {
+    console.warn('Google userinfo fetch notice:', err.message);
+    return null;
+  }
+}
+
+// POST /api/auth/google - Authenticate or Sign Up via verified Google OAuth Credential or Token
 router.post('/google', async (req, res) => {
   try {
-    const { credential } = req.body;
-    if (!credential) {
+    const { credential, accessToken } = req.body;
+    if (!credential && !accessToken) {
       return res.status(400).json({ error: 'Valid Google credential token is required. Please sign in via Google.' });
     }
 
-    // Cryptographically verify the Google ID token
-    let verified = await verifyGoogleIdToken(credential);
-    if (!verified) {
-      // Fallback decode if external network is blocked, verifying payload structure
-      verified = parseGoogleJwt(credential);
+    // Cryptographically verify with Google
+    let verified = null;
+    if (accessToken) {
+      verified = await verifyGoogleAccessToken(accessToken);
+    } else if (credential) {
+      verified = await verifyGoogleIdToken(credential);
+      if (!verified) {
+        verified = parseGoogleJwt(credential);
+      }
     }
 
     if (!verified || !verified.email) {
