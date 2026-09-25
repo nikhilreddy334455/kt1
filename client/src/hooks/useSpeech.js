@@ -7,6 +7,7 @@ export function useSpeech() {
   const [speechSupported, setSpeechSupported] = useState(false);
   const [ttsSupported, setTtsSupported] = useState(false);
   const [voices, setVoices] = useState([]);
+  const [language, setLanguage] = useState('en-US');
   
   const recognitionRef = useRef(null);
   const synthRef = useRef(null);
@@ -19,7 +20,7 @@ export function useSpeech() {
       const recognition = new SpeechRecognition();
       recognition.continuous = false;
       recognition.interimResults = true;
-      recognition.lang = 'en-US';
+      recognition.lang = language;
 
       recognition.onstart = () => {
         setIsListening(true);
@@ -82,19 +83,31 @@ export function useSpeech() {
     };
   }, []);
 
+  // Update recognition language when user switches language
+  useEffect(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.lang = language;
+    }
+  }, [language]);
+
   const startListening = useCallback(() => {
     if (!recognitionRef.current) return;
     setTranscript('');
     try {
+      recognitionRef.current.lang = language;
       recognitionRef.current.start();
     } catch (e) {
-      // In case recognition was already active, restart it
       try {
         recognitionRef.current.stop();
-        setTimeout(() => recognitionRef.current?.start(), 100);
+        setTimeout(() => {
+          if (recognitionRef.current) {
+            recognitionRef.current.lang = language;
+            recognitionRef.current.start();
+          }
+        }, 100);
       } catch (_) {}
     }
-  }, []);
+  }, [language]);
 
   const stopListening = useCallback(() => {
     if (!recognitionRef.current) return;
@@ -108,7 +121,7 @@ export function useSpeech() {
     setTranscript('');
   }, []);
 
-  const speak = useCallback((text, onEnd) => {
+  const speak = useCallback((text, onEnd, customLang) => {
     if (!synthRef.current || !text) return;
 
     try {
@@ -128,21 +141,24 @@ export function useSpeech() {
 
       if (!cleanText) return;
 
+      const targetLang = customLang || language;
       const utterance = new SpeechSynthesisUtterance(cleanText);
       utterance.rate = 0.95; // Calm, empathetic pacing
       utterance.pitch = 1.0;
-      utterance.lang = 'en-US';
+      utterance.lang = targetLang;
 
-      // Pick best natural voice if available
+      // Pick matching voice for selected language
       const voiceList = voices.length > 0 ? voices : synthRef.current.getVoices();
       if (voiceList && voiceList.length > 0) {
-        const preferredVoice = voiceList.find(v => 
-          (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Victoria')) &&
-          v.lang.startsWith('en')
-        ) || voiceList.find(v => v.lang.startsWith('en'));
+        const langPrefix = targetLang.split('-')[0].toLowerCase();
+        const matchingVoice = voiceList.find(v => 
+          v.lang.toLowerCase().replace('_', '-').startsWith(targetLang.toLowerCase())
+        ) || voiceList.find(v => 
+          v.lang.toLowerCase().replace('_', '-').startsWith(langPrefix)
+        );
 
-        if (preferredVoice) {
-          utterance.voice = preferredVoice;
+        if (matchingVoice) {
+          utterance.voice = matchingVoice;
         }
       }
 
@@ -165,7 +181,7 @@ export function useSpeech() {
       setIsSpeaking(false);
       if (onEnd) onEnd();
     }
-  }, [voices]);
+  }, [voices, language]);
 
   const primeAudio = useCallback(() => {
     if (synthRef.current) {
@@ -198,6 +214,8 @@ export function useSpeech() {
     speak,
     primeAudio,
     stopSpeaking,
+    language,
+    setLanguage,
     speechSupported,
     ttsSupported
   };

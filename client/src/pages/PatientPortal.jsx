@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ChatMessage from '../components/ChatMessage';
-import VoiceController from '../components/VoiceController';
+import VoiceController, { SUPPORTED_LANGUAGES } from '../components/VoiceController';
 import useSpeech from '../hooks/useSpeech';
 import { 
   Send, 
@@ -42,6 +42,8 @@ export default function PatientPortal() {
     speak,
     primeAudio,
     stopSpeaking,
+    language,
+    setLanguage,
     speechSupported
   } = useSpeech();
 
@@ -142,13 +144,17 @@ export default function PatientPortal() {
     setLoading(true);
 
     try {
+      const currentLangObj = SUPPORTED_LANGUAGES.find(l => l.code === language);
+      const languageLabel = currentLangObj ? currentLangObj.label : 'English';
+
       const res = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           patientId: patient.id,
           message: messageText,
-          channel
+          channel,
+          language: languageLabel
         })
       });
 
@@ -166,7 +172,7 @@ export default function PatientPortal() {
 
         // If message was via voice channel, speak the reply aloud automatically
         if (channel === 'voice' && data.aiMessage?.content) {
-          speak(data.aiMessage.content, () => setSpeakingMessageId(null));
+          speak(data.aiMessage.content, () => setSpeakingMessageId(null), language);
           setSpeakingMessageId(data.aiMessage.id);
         }
       }
@@ -204,7 +210,7 @@ export default function PatientPortal() {
       stopSpeaking();
       setSpeakingMessageId(null);
     } else {
-      speak(content, () => setSpeakingMessageId(null));
+      speak(content, () => setSpeakingMessageId(null), language);
       setSpeakingMessageId(id);
     }
   };
@@ -366,6 +372,8 @@ export default function PatientPortal() {
             onStopSpeaking={stopSpeaking}
             speechSupported={speechSupported}
             isLoading={loading}
+            selectedLanguage={language}
+            onSelectLanguage={setLanguage}
           />
 
           {/* Text Input Row */}

@@ -1,5 +1,17 @@
-import React, { useEffect } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, Send, Sparkles, AlertCircle } from 'lucide-react';
+import React from 'react';
+import { Mic, MicOff, Volume2, VolumeX, Send, Sparkles, AlertCircle, Globe } from 'lucide-react';
+
+export const SUPPORTED_LANGUAGES = [
+  { code: 'en-US', name: 'English (US)', flag: '🇺🇸', label: 'English' },
+  { code: 'es-ES', name: 'Español', flag: '🇪🇸', label: 'Spanish' },
+  { code: 'hi-IN', name: 'हिन्दी (Hindi)', flag: '🇮🇳', label: 'Hindi' },
+  { code: 'te-IN', name: 'తెలుగు (Telugu)', flag: '🇮🇳', label: 'Telugu' },
+  { code: 'fr-FR', name: 'Français', flag: '🇫🇷', label: 'French' },
+  { code: 'de-DE', name: 'Deutsch', flag: '🇩🇪', label: 'German' },
+  { code: 'ar-SA', name: 'العربية (Arabic)', flag: '🇸🇦', label: 'Arabic' },
+  { code: 'zh-CN', name: '中文 (Mandarin)', flag: '🇨🇳', label: 'Chinese' },
+  { code: 'pt-BR', name: 'Português', flag: '🇧🇷', label: 'Portuguese' }
+];
 
 export default function VoiceController({
   isListening,
@@ -10,9 +22,10 @@ export default function VoiceController({
   isSpeaking,
   onStopSpeaking,
   speechSupported,
-  isLoading
+  isLoading,
+  selectedLanguage = 'en-US',
+  onSelectLanguage
 }) {
-  // If user stops talking and there is a transcript, let them review or send
   const handleToggleMic = () => {
     if (isListening) {
       onStopListening();
@@ -30,6 +43,8 @@ export default function VoiceController({
     }
   };
 
+  const currentLangObj = SUPPORTED_LANGUAGES.find(l => l.code === selectedLanguage) || SUPPORTED_LANGUAGES[0];
+
   return (
     <div className="bg-white rounded-2xl p-4 border border-teal-100 shadow-sm relative overflow-hidden transition-all">
       {/* Active Voice Listening Ambient Background Effect */}
@@ -37,7 +52,7 @@ export default function VoiceController({
         <div className="absolute inset-0 bg-teal-500/5 pointer-events-none transition-all"></div>
       )}
 
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         {/* Left: Mic Button & Dynamic Visualizer */}
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <div className="relative">
@@ -53,7 +68,7 @@ export default function VoiceController({
                   ? 'bg-rose-600 hover:bg-rose-700 text-white ring-4 ring-rose-100 animate-pulse'
                   : 'bg-teal-600 hover:bg-teal-700 text-white ring-2 ring-teal-100 hover:scale-105'
               } disabled:opacity-50 disabled:cursor-not-allowed`}
-              title={isListening ? 'Stop listening' : 'Start speaking'}
+              title={isListening ? 'Stop listening' : `Start speaking in ${currentLangObj.name}`}
             >
               {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
             </button>
@@ -62,7 +77,7 @@ export default function VoiceController({
           <div>
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-slate-800">
-                {isListening ? 'Listening to your voice...' : 'Voice Interaction'}
+                {isListening ? `Listening (${currentLangObj.name})...` : 'Voice & Speech Engine'}
               </span>
               {isListening && (
                 <div className="flex items-center gap-1 h-5 px-2 bg-teal-100/80 rounded-full">
@@ -75,14 +90,31 @@ export default function VoiceController({
             </div>
             <p className="text-xs text-slate-500">
               {isListening
-                ? 'Speak naturally — say your symptoms or questions.'
-                : 'Click microphone to speak or type below.'}
+                ? `Speak naturally in ${currentLangObj.name}.`
+                : `Tap mic to speak or select language below.`}
             </p>
           </div>
         </div>
 
-        {/* Right: Audio Playback Status & Controls */}
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+        {/* Right: Language Selector & Audio Playback Controls */}
+        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto justify-between sm:justify-end">
+          {/* Language Selector Dropdown */}
+          <div className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-200">
+            <Globe className="w-3.5 h-3.5 text-teal-600 flex-shrink-0" />
+            <select
+              value={selectedLanguage}
+              onChange={(e) => onSelectLanguage && onSelectLanguage(e.target.value)}
+              className="bg-transparent text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer pr-1"
+              title="Select speech and listening language"
+            >
+              {SUPPORTED_LANGUAGES.map((lang) => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.flag} {lang.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {isSpeaking && (
             <button
               onClick={onStopSpeaking}
@@ -118,7 +150,7 @@ export default function VoiceController({
             className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-teal-600 hover:bg-teal-700 text-white transition-colors shadow-sm disabled:opacity-50"
           >
             <Send className="w-3 h-3" />
-            <span>Send Voice Note</span>
+            <span>Send Voice Note ({currentLangObj.label})</span>
           </button>
         </div>
       )}

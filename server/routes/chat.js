@@ -9,7 +9,7 @@ const router = express.Router();
 router.post('/', async (req, res) => {
   try {
     const validated = ChatRequestSchema.parse(req.body);
-    const { patientId, message, channel } = validated;
+    const { patientId, message, channel, language } = validated;
 
     // 1. Verify patient exists
     const patientQuery = await pool.query('SELECT * FROM patients WHERE id = $1', [patientId]);
@@ -27,18 +27,12 @@ router.post('/', async (req, res) => {
       [patientId]
     );
 
-    let conversation;
-    if (convQuery.rows.length === 0) {
-      const newConv = await pool.query(
-        `INSERT INTO conversations (patient_id, status, urgency_level) 
-         VALUES ($1, 'active', 'unknown') 
-         RETURNING *`,
-        [patientId]
-      );
-      conversation = newConv.rows[0];
-    } else {
-      conversation = convQuery.rows[0];
-    }
+    let conversation = convQuery.rows.length === 0
+      ? (await pool.query(
+          `INSERT INTO conversations (patient_id, status, urgency_level) VALUES ($1, 'active', 'unknown') RETURNING *`,
+          [patientId]
+        )).rows[0]
+      : convQuery.rows[0];
 
     // 3. Save User message to DB with specified channel ('text' or 'voice')
     const userMsgResult = await pool.query(
@@ -64,6 +58,7 @@ router.post('/', async (req, res) => {
       patient,
       message,
       channel,
+      language: language || 'English',
       history: historyResult.rows
     });
 

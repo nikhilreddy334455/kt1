@@ -3,7 +3,8 @@ import { z } from 'zod';
 export const ChatRequestSchema = z.object({
   patientId: z.number().int().positive(),
   message: z.string().min(1, 'Message cannot be empty'),
-  channel: z.enum(['text', 'voice'])
+  channel: z.enum(['text', 'voice']),
+  language: z.string().optional()
 });
 
 export const LoginSchema = z.object({

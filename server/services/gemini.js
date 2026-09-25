@@ -148,7 +148,7 @@ function analyzeWithHeuristics(message, history = [], patientInfo = {}) {
   };
 }
 
-export async function processMedicalChat({ patient, message, channel, history = [] }) {
+export async function processMedicalChat({ patient, message, channel, language = 'English', history = [] }) {
   const client = getAiClient();
 
   if (client) {
@@ -162,6 +162,11 @@ export async function processMedicalChat({ patient, message, channel, history = 
 - Name: ${patient.full_name || 'Anonymous'}
 - DOB: ${patient.dob ? new Date(patient.dob).toLocaleDateString() : 'Unknown'}
 - Interaction Channel: ${channel}
+- Patient Selected Language: ${language}
+
+IMPORTANT LANGUAGE REQUIREMENT:
+You must formulate 'replyText' fluently and empathetically in ${language} so the patient understands and the voice synthesizer speaks with the correct native accent.
+Always keep 'clinicalSummary' for the nurse dashboard in clear English.
 
 Latest Patient Input: "${message}"`;
 
