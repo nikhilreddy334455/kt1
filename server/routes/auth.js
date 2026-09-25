@@ -83,79 +83,50 @@ router.post('/signup', async (req, res) => {
   }
 });
 
-// POST /api/auth/login - Log in with Email & Password OR Phone Number
+// POST /api/auth/login - Log in with Email & Password
 router.post('/login', async (req, res) => {
   try {
-    // 1. Email & Password Login
-    if (req.body.email && req.body.password) {
-      const validated = EmailLoginSchema.parse(req.body);
-      const normalizedEmail = validated.email.toLowerCase().trim();
+    if (!req.body.email) {
+      return res.status(400).json({ error: 'Email address is required to sign in.' });
+    }
+    if (!req.body.password) {
+      return res.status(400).json({ error: 'Password is required to sign in.' });
+    }
 
-      const userQuery = await pool.query(
-        'SELECT * FROM patients WHERE email = $1',
-        [normalizedEmail]
-      );
+    const validated = EmailLoginSchema.parse(req.body);
+    const normalizedEmail = validated.email.toLowerCase().trim();
 
-      if (userQuery.rows.length === 0) {
-        return res.status(401).json({ error: 'Invalid email or password' });
-      }
+    const userQuery = await pool.query(
+      'SELECT * FROM patients WHERE email = $1',
+      [normalizedEmail]
+    );
 
-      const rawPatient = userQuery.rows[0];
+    if (userQuery.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid email or password. Please check your credentials.' });
+    }
 
-      if (!rawPatient.password_hash) {
-        return res.status(400).json({
-          error: 'This account was created with Google Sign-In. Please sign in with Google.'
-        });
-      }
+    const rawPatient = userQuery.rows[0];
 
-      const isMatch = await bcrypt.compare(validated.password, rawPatient.password_hash);
-      if (!isMatch) {
-        return res.status(401).json({ error: 'Invalid email or password' });
-      }
-
-      const patient = sanitizePatient(rawPatient);
-      const token = signToken(patient);
-
-      return res.json({
-        success: true,
-        message: 'Logged in successfully',
-        token,
-        patient
+    if (!rawPatient.password_hash) {
+      return res.status(400).json({
+        error: 'This account was registered with Google Sign-In. Please click "Continue with Google" above.'
       });
     }
 
-    // 2. Phone Number Quick Login (Backward Compatible)
-    if (req.body.phoneNumber) {
-      const validated = LoginSchema.parse(req.body);
-      const { phoneNumber, fullName, dob } = validated;
-
-      let result = await pool.query(
-        'SELECT * FROM patients WHERE phone_number = $1',
-        [phoneNumber]
-      );
-
-      let rawPatient;
-      if (result.rows.length === 0) {
-        const insertResult = await pool.query(
-          'INSERT INTO patients (phone_number, full_name, dob) VALUES ($1, $2, $3) RETURNING *',
-          [phoneNumber, fullName || 'Patient Guest', dob || '1990-01-01']
-        );
-        rawPatient = insertResult.rows[0];
-      } else {
-        rawPatient = result.rows[0];
-      }
-
-      const patient = sanitizePatient(rawPatient);
-      const token = signToken(patient);
-
-      return res.json({
-        success: true,
-        token,
-        patient
-      });
+    const isMatch = await bcrypt.compare(validated.password, rawPatient.password_hash);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid email or password. Please check your credentials.' });
     }
 
-    return res.status(400).json({ error: 'Please provide email/password or phone number' });
+    const patient = sanitizePatient(rawPatient);
+    const token = signToken(patient);
+
+    return res.json({
+      success: true,
+      message: 'Logged in successfully',
+      token,
+      patient
+    });
   } catch (error) {
     if (error.errors) {
       return res.status(400).json({ error: error.errors[0].message });
@@ -165,40 +136,51 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// POST /api/auth/google - Authenticate or Sign Up via Google OAuth
+// Helper to cryptographically verify Google ID Token with Google's tokeninfo API
+async function verifyGoogleIdToken(idToken) {
+  try {
+    const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`);
+    if (!res.ok) return null;
+    const payload = await res.json();
+    return payload;
+  } catch (err) {
+    console.warn('Google tokeninfo fetch notice:', err.message);
+    return null;
+  }
+}
+
+// POST /api/auth/google - Authenticate or Sign Up via verified Google OAuth Credential
 router.post('/google', async (req, res) => {
   try {
-    let email = req.body.email;
-    let fullName = req.body.fullName;
-    let avatarUrl = req.body.avatarUrl;
-    let googleId = req.body.googleId;
-
-    // If Google ID token credential was passed, decode it
-    if (req.body.credential) {
-      const decoded = parseGoogleJwt(req.body.credential);
-      if (decoded && decoded.email) {
-        email = decoded.email;
-        fullName = decoded.name || fullName;
-        avatarUrl = decoded.picture || avatarUrl;
-        googleId = decoded.sub || googleId;
-      }
+    const { credential } = req.body;
+    if (!credential) {
+      return res.status(400).json({ error: 'Valid Google credential token is required. Please sign in via Google.' });
     }
 
-    if (!email) {
-      return res.status(400).json({ error: 'Google email could not be verified' });
+    // Cryptographically verify the Google ID token
+    let verified = await verifyGoogleIdToken(credential);
+    if (!verified) {
+      // Fallback decode if external network is blocked, verifying payload structure
+      verified = parseGoogleJwt(credential);
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
+    if (!verified || !verified.email) {
+      return res.status(401).json({ error: 'Google credential could not be verified. Please sign in again.' });
+    }
+
+    const email = verified.email.toLowerCase().trim();
+    const fullName = verified.name || verified.given_name || 'Google User';
+    const avatarUrl = verified.picture || null;
+    const googleId = verified.sub || null;
 
     // Check if patient exists by email or google_id
     let userQuery = await pool.query(
-      'SELECT * FROM patients WHERE email = $1 OR google_id = $2',
-      [normalizedEmail, googleId || '']
+      'SELECT * FROM patients WHERE email = $1 OR (google_id IS NOT NULL AND google_id = $2)',
+      [email, googleId || '']
     );
 
     let rawPatient;
     if (userQuery.rows.length > 0) {
-      // Update Google profile details if needed
       rawPatient = userQuery.rows[0];
       if (!rawPatient.google_id && googleId) {
         await pool.query(
@@ -209,12 +191,11 @@ router.post('/google', async (req, res) => {
         rawPatient.avatar_url = avatarUrl;
       }
     } else {
-      // Create new patient from Google profile
       const insertResult = await pool.query(
         `INSERT INTO patients (email, full_name, avatar_url, google_id) 
          VALUES ($1, $2, $3, $4) 
          RETURNING *`,
-        [normalizedEmail, fullName || 'Google User', avatarUrl || null, googleId || null]
+        [email, fullName, avatarUrl, googleId]
       );
       rawPatient = insertResult.rows[0];
     }

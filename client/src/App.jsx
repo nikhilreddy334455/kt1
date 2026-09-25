@@ -70,6 +70,11 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('healthsync_token');
+    try {
+      if (window.google?.accounts?.id) {
+        window.google.accounts.id.disableAutoSelect();
+      }
+    } catch (e) {}
     setCurrentUser(null);
     setCurrentPage('patient');
   };
